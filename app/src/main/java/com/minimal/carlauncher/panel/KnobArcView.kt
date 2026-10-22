@@ -13,8 +13,9 @@ import android.view.View
 /**
  * Draws a sleek, modern curved arc alongside the rotary knob with interactive upper/lower touch targets.
  *
- * @param isLeftKnob true for the left knob (arc curves convex toward the right, e.g. VOL + / -);
- *                   false for the right knob (arc curves convex toward the left, e.g. Track Next / Prev).
+ * Concentric with the physical hardware knob:
+ * - isLeftKnob: curves convex toward the right, hugging the right bezel of the left knob (VOL +/-).
+ * - !isLeftKnob: curves convex toward the left, hugging the left bezel of the right knob (Track Next/Prev).
  */
 class KnobArcView(
     context: Context,
@@ -31,41 +32,52 @@ class KnobArcView(
 
     private val arcPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeWidth = 2f * dens
-        color = Color.argb(120, 255, 255, 255)
+        strokeWidth = 2.5f * dens
+        color = Color.argb(160, 255, 255, 255)
         strokeCap = Paint.Cap.ROUND
     }
 
     private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeWidth = 5f * dens
-        color = Color.argb(40, 65, 199, 240) // subtle neon cyan glow
+        strokeWidth = 6f * dens
+        color = Color.argb(60, 65, 199, 240) // Modern neon cyan glow
         strokeCap = Paint.Cap.ROUND
     }
 
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
-        textSize = 14f * dens
-        typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+        textSize = 15f * dens
+        typeface = Typeface.create("sans-serif-black", Typeface.BOLD)
         textAlign = Paint.Align.CENTER
     }
 
     private val midTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.argb(180, 140, 160, 180)
+        color = Color.argb(190, 140, 175, 210)
         textSize = 10f * dens
-        typeface = Typeface.create("sans-serif", Typeface.BOLD)
+        typeface = Typeface.create("sans-serif-bold", Typeface.BOLD)
         textAlign = Paint.Align.CENTER
+        letterSpacing = 0.08f
     }
+
+    private val activeGlowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = Color.argb(35, 65, 199, 240)
+    }
+
+    private var pressedZone = 0 // 0 none, 1 top, 2 bottom
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-        val inset = 6f * dens
+        val cy = h / 2f
+        val r = 70f * dens
+        val offset = 50f * dens
+
         if (isLeftKnob) {
-            // Arc hugs the right rim of the left circle
-            arcBounds.set(-w * 0.8f, inset, w.toFloat() - inset, h.toFloat() - inset)
+            val cx = -offset
+            arcBounds.set(cx - r, cy - r, cx + r, cy + r)
         } else {
-            // Arc hugs the left rim of the right circle
-            arcBounds.set(inset, inset, w * 1.8f, h.toFloat() - inset)
+            val cx = w.toFloat() + offset
+            arcBounds.set(cx - r, cy - r, cx + r, cy + r)
         }
     }
 
@@ -74,44 +86,47 @@ class KnobArcView(
         val w = width.toFloat()
         val h = height.toFloat()
 
+        if (pressedZone == 1) {
+            canvas.drawRect(0f, 0f, w, h / 2f, activeGlowPaint)
+        } else if (pressedZone == 2) {
+            canvas.drawRect(0f, h / 2f, w, h, activeGlowPaint)
+        }
+
         if (isLeftKnob) {
-            // Arc spanning roughly -45° to +45°
-            canvas.drawArc(arcBounds, -40f, 80f, false, glowPaint)
-            canvas.drawArc(arcBounds, -40f, 80f, false, arcPaint)
+            canvas.drawArc(arcBounds, -36f, 72f, false, glowPaint)
+            canvas.drawArc(arcBounds, -36f, 72f, false, arcPaint)
 
-            // Draw top label (+)
             canvas.drawText(topLabel, w * 0.65f, h * 0.28f, textPaint)
-            // Mid label (e.g. VOL)
             if (midLabel != null) {
-                canvas.drawText(midLabel, w * 0.82f, h * 0.53f, midTextPaint)
+                canvas.drawText(midLabel, w * 0.68f, h * 0.54f, midTextPaint)
             }
-            // Draw bottom label (-)
-            canvas.drawText(bottomLabel, w * 0.65f, h * 0.78f, textPaint)
+            canvas.drawText(bottomLabel, w * 0.65f, h * 0.80f, textPaint)
         } else {
-            // Arc spanning roughly 135° to 225°
-            canvas.drawArc(arcBounds, 140f, 80f, false, glowPaint)
-            canvas.drawArc(arcBounds, 140f, 80f, false, arcPaint)
+            canvas.drawArc(arcBounds, 144f, 72f, false, glowPaint)
+            canvas.drawArc(arcBounds, 144f, 72f, false, arcPaint)
 
-            // Draw top label (Next track)
             canvas.drawText(topLabel, w * 0.35f, h * 0.28f, textPaint)
-            // Mid label if any
             if (midLabel != null) {
-                canvas.drawText(midLabel, w * 0.18f, h * 0.53f, midTextPaint)
+                canvas.drawText(midLabel, w * 0.32f, h * 0.54f, midTextPaint)
             }
-            // Draw bottom label (Prev track)
-            canvas.drawText(bottomLabel, w * 0.35f, h * 0.78f, textPaint)
+            canvas.drawText(bottomLabel, w * 0.35f, h * 0.80f, textPaint)
         }
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (event.action == MotionEvent.ACTION_DOWN) {
-            performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-            if (event.y < height / 2f) {
-                onTopClick()
-            } else {
-                onBottomClick()
+        when (event.action) {
+            MotionEvent.ACTION_DOWN -> {
+                performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                pressedZone = if (event.y < height / 2f) 1 else 2
+                invalidate()
+                if (pressedZone == 1) onTopClick() else onBottomClick()
+                return true
             }
-            return true
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                pressedZone = 0
+                invalidate()
+                return true
+            }
         }
         return super.onTouchEvent(event)
     }
