@@ -172,4 +172,9 @@
     <string name="update_unknown_sources">Allow this launcher to install apps, then tap Install again</string>
     <string name="update_deferred_while_driving">Update paused while the vehicle is moving</string>
     <string name="update_not_configured">Set GITHUB_OWNER and GITHUB_REPO in app/build.gradle.kts</string>
+
+    <!-- Bottom panel -->
+    <string name="settings_panel">Bottom panel (Nowada / NWD K2401)</string>
+    <string name="settings_panel_enabled">Enable bottom overlay strip</string>
+    <string name="settings_panel_hint">Draws quick controls in the 170 px black area below the app window</string>
 </resources>

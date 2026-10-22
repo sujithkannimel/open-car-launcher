@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Intent
 import android.content.res.Configuration
 import android.provider.AlarmClock
+import android.provider.Settings
 import android.os.Bundle
 import android.os.SystemClock
 import android.view.HapticFeedbackConstants
@@ -25,6 +26,7 @@ import com.minimal.carlauncher.core.Prefs
 import com.minimal.carlauncher.databinding.ActivityHomeBinding
 import com.minimal.carlauncher.location.HeadingSource
 import com.minimal.carlauncher.location.VehicleState
+import com.minimal.carlauncher.panel.PanelService
 import com.minimal.carlauncher.update.ApkInstaller
 import com.minimal.carlauncher.update.UpdateState
 import com.minimal.carlauncher.util.IntentUtil
@@ -96,6 +98,11 @@ class HomeActivity : AppCompatActivity() {
         bindDockActions()
         bindBackBehaviour()
         observe()
+
+        // Bottom panel's Apps button may have started us with this extra.
+        if (intent.getBooleanExtra("open_drawer", false)) {
+            binding.root.post { drawer.open() }
+        }
     }
 
     // ------------------------------------------------------------------ wiring
@@ -341,6 +348,20 @@ class HomeActivity : AppCompatActivity() {
         cards.refreshLabels()
         render(viewModel.vehicle.value)
         maybeAutoStartDashcam()
+        maybeStartPanel()
+    }
+
+    private fun maybeStartPanel() {
+        if (!Prefs.panelEnabled) return
+        if (!Settings.canDrawOverlays(this)) return
+        val intent = Intent(this, PanelService::class.java).apply {
+            action = PanelService.ACTION_WAKE
+        }
+        try {
+            startForegroundService(intent)
+        } catch (e: Exception) {
+            PanelService.log(this, "panel start from launcher failed: $e")
+        }
     }
 
     /**
@@ -396,6 +417,7 @@ class HomeActivity : AppCompatActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         if (intent.hasCategory(Intent.CATEGORY_HOME)) resetToDashboard()
+        if (intent.getBooleanExtra("open_drawer", false)) drawer.open()
     }
 
     private fun resetToDashboard() {

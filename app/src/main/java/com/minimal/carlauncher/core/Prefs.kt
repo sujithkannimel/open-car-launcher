@@ -43,6 +43,9 @@ object Prefs {
     const val KEY_MAP_HEADING_UP = "pref_map_heading_up"
     const val KEY_LAST_COURSE = "pref_last_course_deg"
     const val KEY_NAV_DESTINATION = "pref_nav_destination"
+    const val KEY_PANEL_ENABLED = "pref_panel_enabled"
+    const val KEY_PANEL_HEIGHT = "pref_panel_height"
+    const val KEY_PANEL_SIDE_MARGIN = "pref_panel_side_margin"
 
     const val COMPASS_AUTO = "auto"
     const val COMPASS_GPS = "gps"
@@ -197,4 +200,17 @@ object Prefs {
     var mapHeadingUp: Boolean
         get() = sp.getBoolean(KEY_MAP_HEADING_UP, true)
         set(value) = sp.edit().putBoolean(KEY_MAP_HEADING_UP, value).apply()
+
+    // ------------------------------------------------ bottom panel
+    var panelEnabled: Boolean
+        get() = sp.getBoolean(KEY_PANEL_ENABLED, true)
+        set(value) = sp.edit().putBoolean(KEY_PANEL_ENABLED, value).apply()
+
+    var panelHeight: Int
+        get() = sp.getInt(KEY_PANEL_HEIGHT, 170)
+        set(value) = sp.edit().putInt(KEY_PANEL_HEIGHT, value).apply()
+
+    var panelSideMargin: Int
+        get() = sp.getInt(KEY_PANEL_SIDE_MARGIN, 200)
+        set(value) = sp.edit().putInt(KEY_PANEL_SIDE_MARGIN, value).apply()
 }

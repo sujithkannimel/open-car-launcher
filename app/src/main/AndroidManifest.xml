@@ -18,6 +18,11 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.EXPAND_STATUS_BAR" />
 
+    <!-- Bottom panel overlay: draws in the 170 px black strip below the app window. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
     <!-- Head units routinely lack GPS hardware flags, a magnetometer, or both. -->
     <uses-feature android:name="android.hardware.location.gps" android:required="false" />
     <uses-feature android:name="android.hardware.sensor.compass" android:required="false" />
@@ -116,6 +121,28 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
+
+        <!-- Bottom panel overlay service -->
+        <service
+            android:name=".panel.PanelService"
+            android:exported="false"
+            android:stopWithTask="false" />
+
+        <receiver
+            android:name=".panel.PanelReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="com.nwd.action.ACC_ON" />
+                <action android:name="com.nwd.action.SLEEP_OUT" />
+                <action android:name="com.nwd.action.POWER_ON" />
+                <action android:name="android.intent.action.ACC_ON" />
+                <action android:name="com.tw.action.ACC_ON" />
+                <action android:name="com.ivy.action.ACC_ON" />
+                <action android:name="android.intent.action.USER_PRESENT" />
+            </intent-filter>
+        </receiver>
 
         <provider
             android:name="androidx.core.content.FileProvider"

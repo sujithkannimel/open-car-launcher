@@ -149,6 +149,14 @@ object SettingsDialog {
             Prefs.dashcamReturnHome = checked
         }
 
+        // --- bottom panel (K2401) ---
+        val panelCheck = view.findViewById<CheckBox>(R.id.checkPanelEnabled)
+        panelCheck.isChecked = Prefs.panelEnabled
+        panelCheck.setOnCheckedChangeListener { _, checked ->
+            Prefs.panelEnabled = checked
+            onPrefsChanged()
+        }
+
         view.findViewById<Button>(R.id.btnResetDock).setOnClickListener {
             onDockReset()
             Toast.makeText(activity, R.string.dock_reset, Toast.LENGTH_SHORT).show()
