@@ -14,7 +14,7 @@ import android.view.View
  * Draws a sleek, modern curved arc alongside the rotary knob with interactive upper/lower touch targets.
  *
  * Concentric with the physical hardware knob:
- * - isLeftKnob: curves convex toward the right, hugging the right bezel of the left knob (VOL +/-).
+ * - isLeftKnob: curves convex toward the right, hugging the right bezel of the left knob (VOL -/+).
  * - !isLeftKnob: curves convex toward the left, hugging the left bezel of the right knob (Track Next/Prev).
  */
 class KnobArcView(
@@ -32,21 +32,21 @@ class KnobArcView(
 
     private val arcPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeWidth = 2.5f * dens
-        color = Color.argb(160, 255, 255, 255)
+        strokeWidth = 3f * dens
+        color = Color.argb(220, 255, 255, 255)
         strokeCap = Paint.Cap.ROUND
     }
 
     private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeWidth = 6f * dens
-        color = Color.argb(60, 65, 199, 240) // Modern neon cyan glow
+        strokeWidth = 7f * dens
+        color = Color.argb(90, 0, 229, 255) // Modern automotive neon cyan glow
         strokeCap = Paint.Cap.ROUND
     }
 
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
-        textSize = 15f * dens
+        textSize = 18f * dens
         typeface = Typeface.create("sans-serif-black", Typeface.BOLD)
         textAlign = Paint.Align.CENTER
     }
@@ -61,7 +61,7 @@ class KnobArcView(
 
     private val activeGlowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
-        color = Color.argb(35, 65, 199, 240)
+        color = Color.argb(45, 0, 229, 255)
     }
 
     private var pressedZone = 0 // 0 none, 1 top, 2 bottom
@@ -70,8 +70,7 @@ class KnobArcView(
         super.onSizeChanged(w, h, oldw, oldh)
         val cy = h / 2f
         val r = 70f * dens
-        val offset = 50f * dens
-
+        val offset = 48f * dens
         if (isLeftKnob) {
             val cx = -offset
             arcBounds.set(cx - r, cy - r, cx + r, cy + r)
@@ -95,21 +94,19 @@ class KnobArcView(
         if (isLeftKnob) {
             canvas.drawArc(arcBounds, -36f, 72f, false, glowPaint)
             canvas.drawArc(arcBounds, -36f, 72f, false, arcPaint)
-
-            canvas.drawText(topLabel, w * 0.65f, h * 0.28f, textPaint)
-            if (midLabel != null) {
-                canvas.drawText(midLabel, w * 0.68f, h * 0.54f, midTextPaint)
+            canvas.drawText(topLabel, w * 0.62f, h * 0.30f, textPaint)
+            if (!midLabel.isNullOrBlank()) {
+                canvas.drawText(midLabel, w * 0.65f, h * 0.54f, midTextPaint)
             }
-            canvas.drawText(bottomLabel, w * 0.65f, h * 0.80f, textPaint)
+            canvas.drawText(bottomLabel, w * 0.62f, h * 0.80f, textPaint)
         } else {
             canvas.drawArc(arcBounds, 144f, 72f, false, glowPaint)
             canvas.drawArc(arcBounds, 144f, 72f, false, arcPaint)
-
-            canvas.drawText(topLabel, w * 0.35f, h * 0.28f, textPaint)
-            if (midLabel != null) {
-                canvas.drawText(midLabel, w * 0.32f, h * 0.54f, midTextPaint)
+            canvas.drawText(topLabel, w * 0.38f, h * 0.30f, textPaint)
+            if (!midLabel.isNullOrBlank()) {
+                canvas.drawText(midLabel, w * 0.35f, h * 0.54f, midTextPaint)
             }
-            canvas.drawText(bottomLabel, w * 0.35f, h * 0.80f, textPaint)
+            canvas.drawText(bottomLabel, w * 0.38f, h * 0.80f, textPaint)
         }
     }
 

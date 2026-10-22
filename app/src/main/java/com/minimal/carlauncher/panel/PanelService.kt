@@ -35,6 +35,8 @@ import android.widget.LinearLayout
 import android.widget.TextClock
 import android.widget.TextView
 import android.widget.Toast
+import androidx.core.content.res.ResourcesCompat
+import com.minimal.carlauncher.R
 import com.minimal.carlauncher.core.Prefs
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -44,10 +46,10 @@ import java.util.Locale
  * Modern overlay panel service for the Allwinner T507 / A133 (NWD K2401) head unit.
  *
  * Spans the full 1280×170 px bottom display area, integrating:
- * - Left Knob: Live Volume digital readout inside the physical knob + curved VOL +/- arc.
- * - Center: Large modern automotive digital clock, battery voltage telemetry (⚡ 11.9V),
- *           and quick-launcher buttons (Home, All Apps, Navigation, Phone).
- * - Right Knob: Interactive Media Play/Pause inside the physical knob + curved Track Next/Prev arc.
+ * - Left Knob: Illuminated white aperture with bold black volume digits + curved VOL -/+ arc.
+ * - Center: Large modern automotive digital clock (Orbitron), battery voltage telemetry (⚡ 11.9V),
+ *           and enlarged quick-launcher buttons (Home, All Apps, Navigation, Phone).
+ * - Right Knob: Illuminated white aperture with bold black Play/Pause + curved Track Next/Prev arc.
  */
 class PanelService : Service() {
 
@@ -55,20 +57,16 @@ class PanelService : Service() {
     private var am: AudioManager? = null
     private var panel: View? = null
     private var handle: View? = null
-
     private var screenReceiver: BroadcastReceiver? = null
     private var volumeReceiver: BroadcastReceiver? = null
     private var volumeObserver: ContentObserver? = null
     private var batteryReceiver: BroadcastReceiver? = null
-
     private var volumeDisplay: TextView? = null
     private var batteryDisplay: TextView? = null
     private var isPlayingState = false
     private var playPauseText: TextView? = null
-
     private var hidden = false
     private var dens = 1f
-
     private val handler = Handler(Looper.getMainLooper())
 
     private val watchdog = object : Runnable {
@@ -128,6 +126,14 @@ class PanelService : Service() {
             log("ping — views missing, rebuilding")
         }
 
+        log(
+            when {
+                intent == null -> "service restarted by system"
+                action == ACTION_PING -> "revived by keep-alive"
+                else -> "service started"
+            }
+        )
+
         hidden = false
         build()
         restartWatchdog()
@@ -146,12 +152,25 @@ class PanelService : Service() {
         super.onDestroy()
     }
 
-    // --------------------------------------------------------------------- view management
+    // --------------------------------------------------------------------- font helper
+    private fun getOrbitronTypeface(bold: Boolean = true): Typeface {
+        return try {
+            ResourcesCompat.getFont(this, R.font.orbitron) ?: (
+                if (bold) Typeface.create("sans-serif-black", Typeface.BOLD)
+                else Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            )
+        } catch (_: Exception) {
+            if (bold) Typeface.create("sans-serif-black", Typeface.BOLD)
+            else Typeface.create("sans-serif-medium", Typeface.NORMAL)
+        }
+    }
 
+    // --------------------------------------------------------------------- view management
     private fun build() {
         clear()
         val real = DisplayMetrics()
         wm?.defaultDisplay?.getRealMetrics(real) ?: return
+
         if (hidden) {
             addHandle(real)
         } else {
@@ -177,16 +196,17 @@ class PanelService : Service() {
         root.addView(topDivider, FrameLayout.LayoutParams(M, px(1.5f), Gravity.TOP))
 
         // Knob sizing & alignment calibrated to physical bezel
-        val knobSize = px(90f)
+        val knobSize = px(94f)
         val arcWidth = px(65f)
-        val arcHeight = px(120f)
+        val arcHeight = px(124f)
 
-        // 1. LEFT KNOB CONTAINER (Centered at x = 100dp, y = 70dp)
+        // 1. LEFT KNOB CONTAINER (White illuminated circular aperture matching factory photo)
         val leftKnobCircle = FrameLayout(this).apply {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
-                setColor(Color.rgb(12, 16, 22)) // Blends into physical black bezel
+                setColor(Color.WHITE) // High contrast white disc visible through knob hole
             }
+            elevation = px(6f).toFloat()
             isClickable = true
             isFocusable = true
             setOnClickListener {
@@ -196,60 +216,50 @@ class PanelService : Service() {
             }
         }
 
-        val volumeCol = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-        }
-        val volLabel = TextView(this).apply {
-            text = "VOL"
-            setTextColor(Color.rgb(130, 160, 190))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
-            typeface = Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER
-            letterSpacing = 0.12f
-        }
         val volValue = TextView(this).apply {
             text = getCurrentVolumeDisplay()
-            setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 34f)
-            typeface = Typeface.create("sans-serif-black", Typeface.BOLD)
+            setTextColor(Color.rgb(18, 18, 18)) // Bold solid black digits
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 36f)
+            typeface = getOrbitronTypeface(bold = true)
             gravity = Gravity.CENTER
             paint.fontFeatureSettings = "tnum"
+            includeFontPadding = false
         }
         volumeDisplay = volValue
-        volumeCol.addView(volLabel)
-        volumeCol.addView(volValue)
-        leftKnobCircle.addView(volumeCol, FrameLayout.LayoutParams(W, W, Gravity.CENTER))
+        leftKnobCircle.addView(
+            volValue,
+            FrameLayout.LayoutParams(M, M, Gravity.CENTER)
+        )
 
         val leftParams = FrameLayout.LayoutParams(knobSize, knobSize, Gravity.START or Gravity.TOP).apply {
-            leftMargin = px(55f)
-            topMargin = px(25f)
+            leftMargin = px(44f)
+            topMargin = px(38f)
         }
         root.addView(leftKnobCircle, leftParams)
 
-        // Curved arc hugging the outer rim of the left knob
+        // Curved arc hugging the outer rim of the left knob: Top is "-", Bottom is "+"
         val leftArc = KnobArcView(
             context = this,
             isLeftKnob = true,
-            topLabel = "+",
-            bottomLabel = "-",
-            midLabel = "VOL",
-            onTopClick = { adjustVolume(up = true) },
-            onBottomClick = { adjustVolume(up = false) }
+            topLabel = "-",
+            bottomLabel = "+",
+            midLabel = null,
+            onTopClick = { adjustVolume(up = false) },
+            onBottomClick = { adjustVolume(up = true) }
         )
         val leftArcParams = FrameLayout.LayoutParams(arcWidth, arcHeight, Gravity.START or Gravity.TOP).apply {
-            leftMargin = px(150f)
-            topMargin = px(10f)
+            leftMargin = px(132f)
+            topMargin = px(23f)
         }
         root.addView(leftArc, leftArcParams)
 
-        // 2. RIGHT KNOB CONTAINER (Centered at real.width - 100dp, y = 70dp)
+        // 2. RIGHT KNOB CONTAINER (White illuminated circular aperture matching factory photo)
         val rightArc = KnobArcView(
             context = this,
             isLeftKnob = false,
             topLabel = "▶|",
             bottomLabel = "|◀",
-            midLabel = "TRACK",
+            midLabel = null,
             onTopClick = {
                 sendMediaKey(KeyEvent.KEYCODE_MEDIA_NEXT)
                 Toast.makeText(this, "Next track", Toast.LENGTH_SHORT).show()
@@ -260,16 +270,17 @@ class PanelService : Service() {
             }
         )
         val rightArcParams = FrameLayout.LayoutParams(arcWidth, arcHeight, Gravity.END or Gravity.TOP).apply {
-            rightMargin = px(150f)
-            topMargin = px(10f)
+            rightMargin = px(132f)
+            topMargin = px(23f)
         }
         root.addView(rightArc, rightArcParams)
 
         val rightKnobCircle = FrameLayout(this).apply {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
-                setColor(Color.rgb(12, 16, 22))
+                setColor(Color.WHITE) // High contrast white disc visible through knob hole
             }
+            elevation = px(6f).toFloat()
             isClickable = true
             isFocusable = true
             setOnClickListener {
@@ -279,33 +290,24 @@ class PanelService : Service() {
                 updatePlayPauseState()
             }
         }
-        val playCol = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-        }
-        val mediaLabel = TextView(this).apply {
-            text = "MEDIA"
-            setTextColor(Color.rgb(130, 160, 190))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
-            typeface = Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER
-            letterSpacing = 0.12f
-        }
+
         val mediaIcon = TextView(this).apply {
-            text = if (isPlayingState) "❚❚" else "▷II"
-            setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 26f)
+            text = if (isPlayingState) "❚❚" else "▶"
+            setTextColor(Color.rgb(18, 18, 18)) // Bold solid black symbol
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 32f)
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
+            includeFontPadding = false
         }
         playPauseText = mediaIcon
-        playCol.addView(mediaLabel)
-        playCol.addView(mediaIcon)
-        rightKnobCircle.addView(playCol, FrameLayout.LayoutParams(W, W, Gravity.CENTER))
+        rightKnobCircle.addView(
+            mediaIcon,
+            FrameLayout.LayoutParams(M, M, Gravity.CENTER)
+        )
 
         val rightParams = FrameLayout.LayoutParams(knobSize, knobSize, Gravity.END or Gravity.TOP).apply {
-            rightMargin = px(55f)
-            topMargin = px(25f)
+            rightMargin = px(44f)
+            topMargin = px(38f)
         }
         root.addView(rightKnobCircle, rightParams)
 
@@ -315,8 +317,8 @@ class PanelService : Service() {
             gravity = Gravity.CENTER
         }
 
-        val btnSize = px(52f)
-        val btnRadius = px(16f).toFloat()
+        val btnSize = px(62f)      // Enlarged modern rounded squircle buttons
+        val btnRadius = px(18f).toFloat()
 
         // 🏠 Home button
         val btnHome = modernButton(
@@ -332,8 +334,8 @@ class PanelService : Service() {
         // ▦ All Apps button
         val btnApps = modernButton(
             symbol = "▦",
-            startColor = 0xFF1976D2.toInt(),
-            endColor = 0xFF42A5F5.toInt(),
+            startColor = 0xFF1565C0.toInt(),
+            endColor = 0xFF1E88E5.toInt(),
             size = btnSize,
             radius = btnRadius
         ) {
@@ -341,10 +343,10 @@ class PanelService : Service() {
         }
 
         // 🕒 Modern Automotive Digital Clock + Battery Voltage Telemetry Group
-        val clockGroup = LinearLayout(this).apply {
+        val centerCluster = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            setPadding(px(20f), 0, px(20f), 0)
+            setPadding(px(16f), 0, px(16f), 0)
             isClickable = true
             isFocusable = true
             setOnClickListener { openClock() }
@@ -354,40 +356,42 @@ class PanelService : Service() {
             setFormat12Hour("h:mm")
             setFormat24Hour("HH:mm")
             setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 44f)
-            typeface = Typeface.create("sans-serif-black", Typeface.BOLD)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 52f) // Large automotive typeface
+            typeface = getOrbitronTypeface(bold = true)
             gravity = Gravity.CENTER
             paint.fontFeatureSettings = "tnum"
             includeFontPadding = false
         }
 
-        val telemetryRow = LinearLayout(this).apply {
+        val subStrip = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-            setPadding(0, px(2f), 0, 0)
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, px(3f), 0, 0)
         }
 
         val dateClock = TextClock(this).apply {
             setFormat12Hour("EEE, d MMM")
             setFormat24Hour("EEE, d MMM")
-            setTextColor(Color.rgb(175, 195, 215))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
-            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+            setTextColor(Color.rgb(180, 195, 210))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            typeface = getOrbitronTypeface(bold = false)
             gravity = Gravity.CENTER
+            includeFontPadding = false
         }
 
-        val bulletSep = TextView(this).apply {
-            text = "  •  "
-            setTextColor(Color.rgb(110, 130, 150))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
-        }
-
-        val voltText = TextView(this).apply {
-            text = "⚡ " + getBatteryVoltageDisplay()
-            setTextColor(Color.rgb(64, 196, 255))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
-            typeface = Typeface.create("sans-serif-bold", Typeface.BOLD)
+        // Prominent Battery Voltage Pill Badge (Cyan Accent)
+        val batteryBadge = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
+            background = GradientDrawable().apply {
+                setColor(Color.argb(70, 0, 229, 255))
+                setStroke(px(1.2f), Color.argb(160, 0, 229, 255))
+                cornerRadius = px(10f).toFloat()
+            }
+            setPadding(px(8f), px(2f), px(8f), px(2f))
+            layoutParams = LinearLayout.LayoutParams(W, W).apply {
+                leftMargin = px(10f)
+            }
             isClickable = true
             isFocusable = true
             setOnClickListener {
@@ -396,20 +400,29 @@ class PanelService : Service() {
                 updateBatteryDisplay()
             }
         }
+
+        val voltText = TextView(this).apply {
+            text = "⚡ " + getBatteryVoltageDisplay()
+            setTextColor(Color.rgb(0, 240, 255)) // Electric cyan
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+            typeface = getOrbitronTypeface(bold = true)
+            gravity = Gravity.CENTER
+            includeFontPadding = false
+        }
         batteryDisplay = voltText
+        batteryBadge.addView(voltText)
 
-        telemetryRow.addView(dateClock)
-        telemetryRow.addView(bulletSep)
-        telemetryRow.addView(voltText)
+        subStrip.addView(dateClock)
+        subStrip.addView(batteryBadge)
 
-        clockGroup.addView(timeClock)
-        clockGroup.addView(telemetryRow)
+        centerCluster.addView(timeClock)
+        centerCluster.addView(subStrip)
 
         // 🗺️ Navigation button
         val btnNav = modernButton(
             symbol = "▲",
-            startColor = 0xFF0097A7.toInt(),
-            endColor = 0xFF26C6DA.toInt(),
+            startColor = 0xFF00838F.toInt(),
+            endColor = 0xFF00ACC1.toInt(),
             size = btnSize,
             radius = btnRadius
         ) {
@@ -419,19 +432,19 @@ class PanelService : Service() {
         // 📞 Phone button
         val btnPhone = modernButton(
             symbol = "📞",
-            startColor = 0xFF00C853.toInt(),
-            endColor = 0xFF69F0AE.toInt(),
+            startColor = 0xFF2E7D32.toInt(),
+            endColor = 0xFF43A047.toInt(),
             size = btnSize,
             radius = btnRadius
         ) {
             openDialer()
         }
 
-        centerBar.addView(btnHome, margin(btnSize, px(8f)))
-        centerBar.addView(btnApps, margin(btnSize, px(8f)))
-        centerBar.addView(clockGroup, LinearLayout.LayoutParams(W, W))
-        centerBar.addView(btnNav, margin(btnSize, px(8f)))
-        centerBar.addView(btnPhone, margin(btnSize, px(8f)))
+        centerBar.addView(btnHome, margin(btnSize, px(7f)))
+        centerBar.addView(btnApps, margin(btnSize, px(7f)))
+        centerBar.addView(centerCluster, LinearLayout.LayoutParams(W, W))
+        centerBar.addView(btnNav, margin(btnSize, px(7f)))
+        centerBar.addView(btnPhone, margin(btnSize, px(7f)))
 
         root.addView(centerBar, FrameLayout.LayoutParams(W, h, Gravity.CENTER))
 
@@ -463,15 +476,17 @@ class PanelService : Service() {
                 intArrayOf(startColor, endColor)
             ).apply {
                 cornerRadius = radius
+                setStroke(px(1f), Color.argb(60, 255, 255, 255))
             }
-            elevation = px(4f).toFloat()
+            elevation = px(5f).toFloat()
             isClickable = true
             isFocusable = true
             val tv = TextView(context).apply {
                 text = symbol
                 setTextColor(Color.WHITE)
-                textSize = 22f
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 26f)
                 gravity = Gravity.CENTER
+                includeFontPadding = false
             }
             addView(tv, FrameLayout.LayoutParams(M, M, Gravity.CENTER))
             setOnClickListener {
@@ -523,27 +538,32 @@ class PanelService : Service() {
         }
 
     // --------------------------------------------------------------------- volume & media
-
     private fun getCurrentVolumeDisplay(): String {
         return try {
-            // 1. Try reading system car speaker volume first (Allwinner T507 / K2401)
+            // 1. Check system settings keys written by Allwinner T507 / K2401 MCU
             val carSpeakerVol = Settings.System.getInt(contentResolver, "volume_music_speaker", -1)
             if (carSpeakerVol in 0..60) return carSpeakerVol.toString()
 
             val carSysVol = Settings.System.getInt(contentResolver, "volume_music", -1)
             if (carSysVol in 0..60) return carSysVol.toString()
 
+            val carAppVol = Settings.System.getInt(contentResolver, "app_volume_music", -1)
+            if (carAppVol in 0..60) return carAppVol.toString()
+
+            val soundVol = Settings.System.getInt(contentResolver, "sound_volume", -1)
+            if (soundVol in 0..60) return soundVol.toString()
+
             // 2. Read live stream volume via AudioManager
             val audio = am ?: (getSystemService(AUDIO_SERVICE) as AudioManager)
             val curMusic = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
-            if (curMusic >= 0) return curMusic.toString()
+            if (curMusic in 0..60) return curMusic.toString()
 
             val curSys = audio.getStreamVolume(AudioManager.STREAM_SYSTEM)
-            if (curSys >= 0) return curSys.toString()
+            if (curSys in 0..60) return curSys.toString()
 
-            "0"
+            "10"
         } catch (_: Exception) {
-            "0"
+            "10"
         }
     }
 
@@ -555,8 +575,11 @@ class PanelService : Service() {
 
     private fun adjustVolume(up: Boolean) {
         try {
+            val audio = am ?: (getSystemService(AUDIO_SERVICE) as AudioManager)
             val dir = if (up) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER
-            am?.adjustStreamVolume(AudioManager.STREAM_MUSIC, dir, AudioManager.FLAG_SHOW_UI)
+            audio.adjustStreamVolume(AudioManager.STREAM_MUSIC, dir, AudioManager.FLAG_SHOW_UI)
+            val keyCode = if (up) KeyEvent.KEYCODE_VOLUME_UP else KeyEvent.KEYCODE_VOLUME_DOWN
+            sendMediaKey(keyCode)
             updateVolumeDisplay()
         } catch (e: Exception) {
             log("adjustVolume failed: $e")
@@ -565,13 +588,13 @@ class PanelService : Service() {
 
     private fun updatePlayPauseState() {
         handler.post {
-            playPauseText?.text = if (isPlayingState) "❚❚" else "▷II"
+            playPauseText?.text = if (isPlayingState) "❚❚" else "▶"
         }
     }
 
     private fun sendMediaKey(keyCode: Int) {
         try {
-            val audio = am ?: getSystemService(AUDIO_SERVICE) as AudioManager
+            val audio = am ?: (getSystemService(AUDIO_SERVICE) as AudioManager)
             val now = SystemClock.uptimeMillis()
             audio.dispatchMediaKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN, keyCode, 0))
             audio.dispatchMediaKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_UP, keyCode, 0))
@@ -662,7 +685,9 @@ class PanelService : Service() {
             "car_voltage",
             "voltage_battery",
             "system_battery_voltage",
-            "mcu_battery_voltage"
+            "mcu_battery_voltage",
+            "battery_vol",
+            "car_vol"
         )
         for (k in candidateKeys) {
             try {
@@ -707,7 +732,6 @@ class PanelService : Service() {
     }
 
     // --------------------------------------------------------------------- navigation & launchers
-
     private fun openHomeDashboard() {
         try {
             val intent = Intent(this, Class.forName("com.minimal.carlauncher.ui.HomeActivity"))
@@ -734,12 +758,10 @@ class PanelService : Service() {
         val launchIntent = if (!storedNav.isNullOrBlank()) {
             packageManager.getLaunchIntentForPackage(storedNav)
         } else null
-
         val intent = launchIntent
             ?: packageManager.getLaunchIntentForPackage("com.google.android.apps.maps")
             ?: packageManager.getLaunchIntentForPackage("com.autonavi.amapauto")
             ?: Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q="))
-
         startSafely(intent)
     }
 
@@ -766,7 +788,6 @@ class PanelService : Service() {
     }
 
     // --------------------------------------------------------------------- watchdog & screen
-
     private fun checkViews() {
         if (wm == null) return
         if (hidden) {
@@ -842,10 +863,8 @@ class PanelService : Service() {
         private const val CHANNEL_ID = "bottom_panel"
         private const val NOTIFICATION_ID = 42
         private const val WATCHDOG_INTERVAL_MS = 1500L
-
         const val ACTION_WAKE = "com.minimal.carlauncher.panel.WAKE"
         const val ACTION_PING = "com.minimal.carlauncher.panel.PING"
-
         private const val PANEL_BG = 0xFF0D1117.toInt() // Deep modern satin cockpit dark
         private const val W = ViewGroup.LayoutParams.WRAP_CONTENT
         private const val M = ViewGroup.LayoutParams.MATCH_PARENT
