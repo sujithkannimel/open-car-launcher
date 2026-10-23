@@ -69,8 +69,8 @@ class KnobArcView(
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         val cy = h / 2f
-        val r = 70f * dens
-        val offset = 48f * dens
+        val r = 64f * dens
+        val offset = 38f * dens
         if (isLeftKnob) {
             val cx = -offset
             arcBounds.set(cx - r, cy - r, cx + r, cy + r)
@@ -92,21 +92,23 @@ class KnobArcView(
         }
 
         if (isLeftKnob) {
-            canvas.drawArc(arcBounds, -36f, 72f, false, glowPaint)
-            canvas.drawArc(arcBounds, -36f, 72f, false, arcPaint)
-            canvas.drawText(topLabel, w * 0.62f, h * 0.30f, textPaint)
+            canvas.drawArc(arcBounds, -42f, 84f, false, glowPaint)
+            canvas.drawArc(arcBounds, -42f, 84f, false, arcPaint)
+            // Top label shifted upper toward the top apex of the arc
+            canvas.drawText(topLabel, w * 0.60f, h * 0.22f, textPaint)
             if (!midLabel.isNullOrBlank()) {
-                canvas.drawText(midLabel, w * 0.65f, h * 0.54f, midTextPaint)
+                canvas.drawText(midLabel, w * 0.64f, h * 0.52f, midTextPaint)
             }
-            canvas.drawText(bottomLabel, w * 0.62f, h * 0.80f, textPaint)
+            canvas.drawText(bottomLabel, w * 0.60f, h * 0.82f, textPaint)
         } else {
-            canvas.drawArc(arcBounds, 144f, 72f, false, glowPaint)
-            canvas.drawArc(arcBounds, 144f, 72f, false, arcPaint)
-            canvas.drawText(topLabel, w * 0.38f, h * 0.30f, textPaint)
+            canvas.drawArc(arcBounds, 138f, 84f, false, glowPaint)
+            canvas.drawArc(arcBounds, 138f, 84f, false, arcPaint)
+            // Top label shifted upper toward the top apex of the arc
+            canvas.drawText(topLabel, w * 0.40f, h * 0.22f, textPaint)
             if (!midLabel.isNullOrBlank()) {
-                canvas.drawText(midLabel, w * 0.35f, h * 0.54f, midTextPaint)
+                canvas.drawText(midLabel, w * 0.36f, h * 0.52f, midTextPaint)
             }
-            canvas.drawText(bottomLabel, w * 0.38f, h * 0.80f, textPaint)
+            canvas.drawText(bottomLabel, w * 0.40f, h * 0.82f, textPaint)
         }
     }
 
