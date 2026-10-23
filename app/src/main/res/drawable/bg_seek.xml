@@ -1,9 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ripple xmlns:android="http://schemas.android.com/apk/res/android"
-    android:color="@color/cockpit_ripple">
+    android:color="#66FFFFFF">
     <item>
         <shape android:shape="oval">
-            <solid android:color="@color/cockpit_surface_alt" />
+            <gradient
+                android:type="radial"
+                android:gradientRadius="28dp"
+                android:startColor="#FF3A7BD5"
+                android:endColor="#FF00D2FF" />
+            <stroke
+                android:width="2dp"
+                android:color="#FF00D2FF" />
         </shape>
     </item>
 </ripple>
+
