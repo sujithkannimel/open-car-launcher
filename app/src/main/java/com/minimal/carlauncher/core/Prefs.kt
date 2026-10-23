@@ -46,6 +46,7 @@ object Prefs {
     const val KEY_PANEL_ENABLED = "pref_panel_enabled"
     const val KEY_PANEL_HEIGHT = "pref_panel_height"
     const val KEY_PANEL_SIDE_MARGIN = "pref_panel_side_margin"
+    const val KEY_PANEL_TRANSPARENT = "pref_panel_transparent"
 
     const val COMPASS_AUTO = "auto"
     const val COMPASS_GPS = "gps"
@@ -213,4 +214,9 @@ object Prefs {
     var panelSideMargin: Int
         get() = sp.getInt(KEY_PANEL_SIDE_MARGIN, 200)
         set(value) = sp.edit().putInt(KEY_PANEL_SIDE_MARGIN, value).apply()
+
+    /** Whether the panel background is semi-transparent instead of solid dark. */
+    var panelTransparent: Boolean
+        get() = sp.getBoolean(KEY_PANEL_TRANSPARENT, false)
+        set(value) = sp.edit().putBoolean(KEY_PANEL_TRANSPARENT, value).apply()
 }
