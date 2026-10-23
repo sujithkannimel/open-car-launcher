@@ -177,7 +177,7 @@ class PanelService : Service() {
      * Bottom panel layout matching the stock K2401 panel style:
      *
      * ```
-     * [knob zone]  [Vol] [⚡V] [🏠] [⊞] [▲] [📍] [📞]   09:41   [▶] [▼]  [knob zone]
+     * [knob zone]  [Vol] [⚡V] [?] [⊞] [▲] [?] [?]   09:41   [▶] [▼]  [knob zone]
      *                                                    Fri, 23 Oct
      * ```
      *
@@ -212,7 +212,7 @@ class PanelService : Service() {
             textSize = 16f
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
-            text = "🔊 --"
+            text = "♫ --"
         }
         infoSection.addView(volumeText, LinearLayout.LayoutParams(W, W))
 
@@ -229,11 +229,11 @@ class PanelService : Service() {
 
         // ---- Center-left section: App shortcut tiles ----
         val tiles = row().apply {
-            addView(tile("🏠", COLOR_HOME, tileSize) { goHome() })
+            addView(tile("⌂", COLOR_HOME, tileSize) { goHome() })
             addView(tile("⊞", COLOR_APPS, tileSize) { openAppGrid() })
             addView(tile("▲", COLOR_NAV, tileSize) { openMaps() })
-            addView(tile("📍", COLOR_MAPS, tileSize) { openMaps() })
-            addView(tile("📞", COLOR_PHONE, tileSize) { openDialer() })
+            addView(tile("◉", COLOR_MAPS, tileSize) { openMaps() })
+            addView(tile("☎", COLOR_PHONE, tileSize) { openDialer() })
         }
         root.addView(tiles, LinearLayout.LayoutParams(W, M))
 
@@ -332,9 +332,9 @@ class PanelService : Service() {
             val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
             val current = am.getStreamVolume(AudioManager.STREAM_MUSIC)
             val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-            tv.text = "🔊 $current/$max"
+            tv.text = "♫ $current/$max"
         } catch (_: Exception) {
-            tv.text = "🔊 --"
+            tv.text = "♫ --"
         }
     }
 
