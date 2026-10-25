@@ -765,6 +765,10 @@ class PanelService : Service() {
         canVolts?.let { v ->
             if (plausible(v)) { voltSource = "NWD CAN broadcast (Voltage=${canRaw})"; return fmtVolts(v) }
         }
+        Prefs.lastVoltage.takeIf { plausible(it) }?.let { v ->
+            voltSource = "last saved value, waiting for broadcast (${lastVoltExtras})"
+            return fmtVolts(v)
+        }
 
         // --- Source 1: BatteryManager sticky broadcast ---
         try {
@@ -811,7 +815,7 @@ class PanelService : Service() {
         lastBroadcastVolts?.let { if (plausible(it.first)) { voltSource = it.second; return fmtVolts(it.first) } }
 
         // No real source: say so instead of showing a made-up number.
-        voltSource = "none found"
+        voltSource = "none found; last broadcast extras: $lastVoltExtras"
         return "--.-V"
     }
 
@@ -819,23 +823,37 @@ class PanelService : Service() {
     private var canVolts: Float? = null
     private var canRaw: Int = -1
 
-    /** Parses ACTION_CAN_BATTERY_VOLTAGE: int extra "Voltage" in tenths of a volt (139 = 13.9V). */
+    /** Extras of the last voltage broadcast, as "key:Type=value", for the pill's tap toast. */
+    private var lastVoltExtras = "none received yet"
+
+    /**
+     * Parses ACTION_CAN_BATTERY_VOLTAGE (sent by com.nwd.kernel every ~30 s). The value is
+     * tenths of a volt (142 = 14.2V). Accepts any numeric type (Int, Short, Byte, Long,
+     * Float...) or a string, under "Voltage" or any key containing "volt".
+     */
     private fun handleCanVoltage(intent: Intent) {
         val ex = intent.extras ?: return
-        val o = ex.get(NWD_VOLT_KEY) ?: ex.get("voltage") ?: return
-        val raw = when (o) {
-            is Int -> o
-            is Long -> o.toInt()
-            is String -> o.trim().toIntOrNull() ?: return
-            is Float -> (o * 10).toInt()
-            is Double -> (o * 10).toInt()
-            else -> return
+        lastVoltExtras = ex.keySet().joinToString { k ->
+            @Suppress("DEPRECATION") val o = ex.get(k)
+            "$k:${o?.javaClass?.simpleName}=$o"
         }
-        // Tenths normally; tolerate a firmware that sends millivolts.
-        val v = if (raw > 1000) raw / 1000f else raw / 10f
-        if (plausible(v)) {
-            canRaw = raw
-            canVolts = v
+        val keys = listOf(NWD_VOLT_KEY) + ex.keySet().filter { it.contains("volt", ignoreCase = true) }
+        for (k in keys) {
+            @Suppress("DEPRECATION") val o = ex.get(k) ?: continue
+            val v: Float = when (o) {
+                is Float -> if (o > 40f) o / 10f else o
+                is Double -> (if (o > 40.0) o / 10.0 else o).toFloat()
+                is Number -> o.toLong().let { if (it > 1000) it / 1000f else it / 10f }
+                is String -> o.filter { it.isDigit() || it == '.' }.toFloatOrNull()
+                    ?.let { if (it > 40f) it / 10f else it } ?: continue
+                else -> continue
+            }
+            if (plausible(v)) {
+                canRaw = (v * 10).toInt()
+                canVolts = v
+                Prefs.lastVoltage = v
+                return
+            }
         }
     }
 
@@ -903,6 +921,9 @@ class PanelService : Service() {
             registerReceiver(batteryReceiver, filter)
             // If the NWD broadcasts are sticky, pick up the last value immediately.
             registerReceiver(null, IntentFilter(NWD_VOLT_ACTION))?.let { handleCanVoltage(it) }
+            // com.nwd.kernel.setting listens for this and answers with ACTION_CAN_BATTERY_VOLTAGE,
+            // so the pill fills in now instead of after the next 30 s broadcast.
+            sendBroadcast(Intent(NWD_VOLT_QUERY_ACTION))
             registerReceiver(null, IntentFilter(NWD_MUSIC_ACTION))?.let { handleMusicState(it) }
         } catch (_: Exception) {}
     }
@@ -1071,6 +1092,7 @@ class PanelService : Service() {
         // Real K2401 / NWD sources (from the unit's logs).
         const val NWD_VOLT_ACTION = "com.nwd.action.ACTION_CAN_BATTERY_VOLTAGE"
         const val NWD_VOLT_KEY = "Voltage"
+        const val NWD_VOLT_QUERY_ACTION = "com.nwd.action.ACTION_QUERY_CAN_BATTERY_VOLTAGE"
         const val NWD_MUSIC_ACTION = "com.nwd.android.ACTION_STREAM_MUSIC"
         const val MCU_VOLUME_KEY = "mcu_system_volume"
 

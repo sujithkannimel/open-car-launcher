@@ -47,6 +47,7 @@ object Prefs {
     const val KEY_PANEL_HEIGHT = "pref_panel_height"
     const val KEY_PANEL_SIDE_MARGIN = "pref_panel_side_margin"
     const val KEY_PANEL_TRANSPARENT = "pref_panel_transparent"
+    const val KEY_LAST_VOLTAGE = "pref_last_voltage"
     const val KEY_KNOB_LX = "pref_knob_left_x"
     const val KEY_KNOB_LY = "pref_knob_left_y"
     const val KEY_KNOB_RX = "pref_knob_right_x"
@@ -234,6 +235,11 @@ object Prefs {
     var panelTransparent: Boolean
         get() = sp.getBoolean(KEY_PANEL_TRANSPARENT, false)
         set(value) = sp.edit().putBoolean(KEY_PANEL_TRANSPARENT, value).apply()
+
+    /** Last car battery voltage from the NWD broadcast, shown until the next one arrives. */
+    var lastVoltage: Float
+        get() = sp.getFloat(KEY_LAST_VOLTAGE, -1f)
+        set(value) = sp.edit().putFloat(KEY_LAST_VOLTAGE, value).apply()
 
     // ------------------------------------------------ knob geometry (panel px)
     var knobLeftX: Int
