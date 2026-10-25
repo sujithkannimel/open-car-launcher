@@ -48,6 +48,8 @@ object Prefs {
     const val KEY_PANEL_SIDE_MARGIN = "pref_panel_side_margin"
     const val KEY_PANEL_TRANSPARENT = "pref_panel_transparent"
     const val KEY_LAST_VOLTAGE = "pref_last_voltage"
+    const val KEY_TRIP_START = "pref_trip_start"
+    const val KEY_TRIP_LAST_SEEN = "pref_trip_last_seen"
     const val KEY_KNOB_LX = "pref_knob_left_x"
     const val KEY_KNOB_LY = "pref_knob_left_y"
     const val KEY_KNOB_RX = "pref_knob_right_x"
@@ -240,6 +242,16 @@ object Prefs {
     var lastVoltage: Float
         get() = sp.getFloat(KEY_LAST_VOLTAGE, -1f)
         set(value) = sp.edit().putFloat(KEY_LAST_VOLTAGE, value).apply()
+
+    /** Wall-clock ms when the current trip (car start) began. */
+    var tripStart: Long
+        get() = sp.getLong(KEY_TRIP_START, 0L)
+        set(value) = sp.edit().putLong(KEY_TRIP_START, value).apply()
+
+    /** Last heartbeat while the unit was on; a long gap means the car was switched off. */
+    var tripLastSeen: Long
+        get() = sp.getLong(KEY_TRIP_LAST_SEEN, 0L)
+        set(value) = sp.edit().putLong(KEY_TRIP_LAST_SEEN, value).apply()
 
     // ------------------------------------------------ knob geometry (panel px)
     var knobLeftX: Int

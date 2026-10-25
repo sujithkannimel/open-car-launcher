@@ -85,13 +85,29 @@ class PanelService : Service() {
     private var isPlayingState = false
     private var lastReportedVolume = -1
 
+    // Reverse camera: panel is removed while mcu_backcar_state != 0.
+    private var reversing = false
+
+    // Neon battery pill
+    private var batteryBadgeView: View? = null
+    private var battLabelView: TextView? = null
+    private var tripView: TextView? = null
+    private var pulseAnim: android.animation.ObjectAnimator? = null
+    private var shownBattState = -1
+    private var pendingBattState = -1
+    private var pendingSeqStart = 0
+    private var voltSeq = 0          // bumps on every fresh reading
+    private var lastHeartbeatMs = 0L
+
     private val handler = Handler(Looper.getMainLooper())
 
     private val watchdog = object : Runnable {
         override fun run() {
+            checkReverse()
             checkViews()
             updateVolumeDisplay()
             updateBatteryDisplay()
+            tripHeartbeat()
             handler.postDelayed(this, WATCHDOG_INTERVAL_MS)
         }
     }
@@ -137,6 +153,9 @@ class PanelService : Service() {
         registerBatteryReceiver()
         registerVolumeReceiver()
         registerVolumeObserver()
+        lastHeartbeatMs = 0L
+        tripHeartbeat()
+        reversing = try { Settings.System.getInt(contentResolver, BACKCAR_KEY, 0) != 0 } catch (_: Exception) { false }
 
         // Wake action: always force-rebuild (called after ACC on via the launcher).
         if (action == ACTION_WAKE) {
@@ -190,6 +209,7 @@ class PanelService : Service() {
         val real = DisplayMetrics()
         wm?.defaultDisplay?.getRealMetrics(real) ?: return
 
+        if (reversing) return   // reverse camera owns the screen
         if (hidden) {
             addHandle(real)
         } else {
@@ -211,6 +231,7 @@ class PanelService : Service() {
         val h = panelHeightPx
 
         val root = FrameLayout(this).apply {
+            clipChildren = false
             setBackgroundColor(if (Prefs.panelTransparent) PANEL_BG_TRANSPARENT else PANEL_BG)
         }
 
@@ -256,18 +277,18 @@ class PanelService : Service() {
         val leftCluster = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.START or Gravity.CENTER_VERTICAL
-            setPadding(px(6f), 0, 0, 0)
+            setPadding(px(6f), px(10f), px(10f), px(10f))
+            // Let the pill's neon halo spill outside its bounds.
+            clipChildren = false
+            clipToPadding = false
         }
 
         val batteryBadge = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            background = GradientDrawable().apply {
-                setColor(Color.argb(70, 0, 229, 255))
-                setStroke(px(1.2f), Color.argb(160, 0, 229, 255))
-                cornerRadius = px(12f).toFloat()
-            }
-            setPadding(px(12f), px(4f), px(12f), px(4f))
+            background = GradientDrawable().apply { cornerRadius = px(14f).toFloat() }
+            elevation = px(8f).toFloat()
+            setPadding(px(14f), px(6f), px(14f), px(6f))
             isClickable = true
             isFocusable = true
             setOnClickListener {
@@ -299,14 +320,31 @@ class PanelService : Service() {
             text = "BATTERY"
             setTextColor(Color.rgb(130, 150, 170))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
-            typeface = Typeface.DEFAULT
-            gravity = Gravity.START
-            setPadding(px(4f), px(2f), 0, 0)
-            letterSpacing = 0.08f
+            typeface = Typeface.DEFAULT_BOLD
+            letterSpacing = 0.14f
             includeFontPadding = false
         }
+        val trip = TextView(this).apply {
+            text = tripText()
+            setTextColor(Color.rgb(150, 165, 182))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+            typeface = Typeface.MONOSPACE
+            includeFontPadding = false
+        }
+        val subRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(px(6f), px(6f), 0, 0)
+            addView(battSubtitle)
+            addView(trip, LinearLayout.LayoutParams(W, W).apply { leftMargin = px(12f) })
+        }
         leftCluster.addView(batteryBadge)
-        leftCluster.addView(battSubtitle)
+        leftCluster.addView(subRow)
+        batteryBadgeView = batteryBadge
+        battLabelView = battSubtitle
+        tripView = trip
+        shownBattState = -1          // force re-style on the new views
+        applyBatteryState(classify(currentVolts()))
 
         val leftClusterParams = FrameLayout.LayoutParams(W, W, Gravity.START or Gravity.CENTER_VERTICAL).apply {
             leftMargin = sideLeft
@@ -703,6 +741,7 @@ class PanelService : Service() {
         volumeObserver = object : ContentObserver(handler) {
             override fun onChange(selfChange: Boolean) {
                 super.onChange(selfChange)
+                checkReverse()
                 updateVolumeDisplay()
             }
         }
@@ -851,6 +890,7 @@ class PanelService : Service() {
             if (plausible(v)) {
                 canRaw = (v * 10).toInt()
                 canVolts = v
+                voltSeq++
                 Prefs.lastVoltage = v
                 return
             }
@@ -877,8 +917,114 @@ class PanelService : Service() {
     private fun updateBatteryDisplay() {
         handler.post {
             val volt = getBatteryVoltageDisplay()
-            batteryDisplay?.text = "\u26A1 $volt"
+            // Non-broadcast sources are polled; treat each poll as a fresh reading.
+            if (!voltSource.startsWith("NWD CAN")) voltSeq++
+            evaluateBatteryState(volt.removeSuffix("V").toFloatOrNull())
+            val icon = BATT_ICONS[shownBattState.coerceAtLeast(0)]
+            batteryDisplay?.text = "$icon $volt"
+            tripView?.text = tripText()
         }
+    }
+
+    private fun currentVolts(): Float? = getBatteryVoltageDisplay().removeSuffix("V").toFloatOrNull()
+
+    /** 0 none, 1 charging, 2 normal, 3 low, 4 critical. */
+    private fun classify(v: Float?): Int = when {
+        v == null -> BATT_NONE
+        v > 15.0f || v < 11.8f -> BATT_CRITICAL
+        v < 12.2f -> BATT_LOW
+        v < 13.2f -> BATT_NORMAL
+        else -> BATT_CHARGING
+    }
+
+    /**
+     * Good news shows at once; LOW / CRITICAL only after two separate readings agree, so a
+     * single dip while cranking never flashes red.
+     */
+    private fun evaluateBatteryState(v: Float?) {
+        val s = classify(v)
+        if (shownBattState == -1 || s == shownBattState || s <= BATT_NORMAL) {
+            pendingBattState = -1
+            applyBatteryState(s)
+            return
+        }
+        if (pendingBattState != s) {
+            pendingBattState = s
+            pendingSeqStart = voltSeq
+            return
+        }
+        if (voltSeq - pendingSeqStart >= 1) applyBatteryState(s)
+    }
+
+    private fun applyBatteryState(s: Int) {
+        if (s == shownBattState) return
+        shownBattState = s
+        val color = BATT_COLORS[s]
+        val badge = batteryBadgeView ?: return
+        (badge.background as? GradientDrawable)?.apply {
+            setColor(Color.argb(40, Color.red(color), Color.green(color), Color.blue(color)))
+            setStroke(px(2f), color)
+        }
+        // Coloured neon halo around the pill (API 28+ coloured elevation shadows).
+        badge.outlineAmbientShadowColor = color
+        badge.outlineSpotShadowColor = color
+        batteryDisplay?.apply {
+            setTextColor(color)
+            setShadowLayer(12f, 0f, 0f, color)
+        }
+        battLabelView?.apply {
+            text = BATT_LABELS[s]
+            setTextColor(if (s >= BATT_LOW) color else Color.rgb(130, 150, 170))
+        }
+        pulseAnim?.cancel()
+        pulseAnim = null
+        badge.alpha = 1f
+        if (s == BATT_CRITICAL) {
+            pulseAnim = android.animation.ObjectAnimator.ofFloat(badge, "alpha", 1f, 0.45f).apply {
+                duration = 650
+                repeatMode = android.animation.ValueAnimator.REVERSE
+                repeatCount = android.animation.ValueAnimator.INFINITE
+                start()
+            }
+        }
+    }
+
+    // --------------------------------------------------------------------- trip timer
+
+    /**
+     * Trip = time since the car was started. A heartbeat is saved every ~30 s while the unit
+     * is on; if the service (re)starts and the last heartbeat is older than TRIP_GAP_MS, the
+     * car was off, so a new trip begins. Works whether ACC-off reboots or just sleeps the unit.
+     */
+    private fun tripHeartbeat() {
+        val now = System.currentTimeMillis()
+        if (now - lastHeartbeatMs < 30_000L) return
+        lastHeartbeatMs = now
+        val last = Prefs.tripLastSeen
+        if (Prefs.tripStart <= 0L || last <= 0L || now - last > TRIP_GAP_MS || now < Prefs.tripStart) {
+            Prefs.tripStart = now
+        }
+        Prefs.tripLastSeen = now
+    }
+
+    private fun tripText(): String {
+        val start = Prefs.tripStart
+        if (start <= 0L) return "\u23F1 0:00"
+        val min = ((System.currentTimeMillis() - start) / 60_000L).coerceAtLeast(0L)
+        return String.format(Locale.US, "\u23F1 %d:%02d", min / 60, min % 60)
+    }
+
+    // --------------------------------------------------------------------- reverse camera
+
+    /** Removes the panel while the reverse camera is on, restores it after. */
+    private fun checkReverse() {
+        val r = try {
+            Settings.System.getInt(contentResolver, BACKCAR_KEY, 0) != 0
+        } catch (_: Exception) { false }
+        if (r == reversing) return
+        reversing = r
+        log(if (r) "reverse on -- hiding panel" else "reverse off -- restoring panel")
+        if (r) clear() else build()
     }
 
     /** Listens for battery voltage changes so the display stays current. */
@@ -1008,7 +1154,7 @@ class PanelService : Service() {
     // --------------------------------------------------------------------- watchdog & screen receiver
 
     private fun checkViews() {
-        if (wm == null) return
+        if (wm == null || reversing) return
         if (hidden) {
             if (handle == null || handle?.isAttachedToWindow != true) {
                 log("handle missing -- re-adding")
@@ -1077,6 +1223,10 @@ class PanelService : Service() {
         handle = null
         knobsView = null
         batteryDisplay = null
+        pulseAnim?.cancel(); pulseAnim = null
+        batteryBadgeView = null
+        battLabelView = null
+        tripView = null
         adjustReadout = null
     }
 
@@ -1095,6 +1245,23 @@ class PanelService : Service() {
         const val NWD_VOLT_QUERY_ACTION = "com.nwd.action.ACTION_QUERY_CAN_BATTERY_VOLTAGE"
         const val NWD_MUSIC_ACTION = "com.nwd.android.ACTION_STREAM_MUSIC"
         const val MCU_VOLUME_KEY = "mcu_system_volume"
+        const val BACKCAR_KEY = "mcu_backcar_state"
+        private const val TRIP_GAP_MS = 3 * 60_000L
+
+        private const val BATT_NONE = 0
+        private const val BATT_CHARGING = 1
+        private const val BATT_NORMAL = 2
+        private const val BATT_LOW = 3
+        private const val BATT_CRITICAL = 4
+        private val BATT_COLORS = intArrayOf(
+            0xFF7D93A8.toInt(),  // none   - muted steel
+            0xFF22D3EE.toInt(),  // charging - cyan (matches the knob arcs)
+            0xFF4ADE80.toInt(),  // normal - green
+            0xFFFBBF24.toInt(),  // low    - amber
+            0xFFF43F5E.toInt(),  // critical - red, pulses
+        )
+        private val BATT_LABELS = arrayOf("BATTERY", "CHARGING", "BATTERY", "LOW", "CRITICAL")
+        private val BATT_ICONS = arrayOf("\u26A1", "\u26A1", "\u25CF", "\u25B2", "!")
 
         // Fallbacks for other firmware.
         private val EXTRA_VOLT_PATHS = listOf(
