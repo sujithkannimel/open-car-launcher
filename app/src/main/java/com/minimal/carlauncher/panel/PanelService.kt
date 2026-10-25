@@ -620,6 +620,14 @@ class PanelService : Service() {
      * Fallback: Settings.System keys for MCU hardware custom volumes.
      */
     private fun getCurrentVolumeDisplay(): String {
+        // NWD MCU: the rotary knob's real volume lives in Settings.System "mcu_system_volume".
+        try {
+            val v = Settings.System.getInt(contentResolver, MCU_VOLUME_KEY, -1)
+            if (v in 0..60) {
+                lastReportedVolume = v
+                return v.toString()
+            }
+        } catch (_: Exception) {}
         try {
             val audio = am ?: (getSystemService(AUDIO_SERVICE) as AudioManager)
             val curMusic = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
@@ -775,7 +783,8 @@ class PanelService : Service() {
     /**
      * Reads the car battery / ACC input voltage from every known source on the K2401.
      *
-     * Chain (first valid value in 8-18V wins):
+     * Chain (first valid value wins):
+     * 0. NWD CAN broadcast com.nwd.action.ACTION_CAN_BATTERY_VOLTAGE, extra "Voltage" (139 = 13.9V).
      * 1. BatteryManager.EXTRA_VOLTAGE from the sticky BATTERY_CHANGED broadcast.
      * 2. Linux sysfs power_supply nodes -- Allwinner T507/A133 SoCs expose the ACC input
      *    voltage here as microvolts (e.g. 12300000 = 12.3V). The AXP2202 PMIC and generic
@@ -800,6 +809,11 @@ class PanelService : Service() {
     private fun plausible(v: Float) = v in 6.0f..18.5f
 
     private fun getBatteryVoltageDisplay(): String {
+        // --- Source 0: NWD CAN box broadcast (what the stock launcher shows) ---
+        canVolts?.let { v ->
+            if (plausible(v)) { voltSource = "NWD CAN broadcast (Voltage=${canRaw})"; return fmtVolts(v) }
+        }
+
         // --- Source 1: BatteryManager sticky broadcast ---
         try {
             val bi = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
@@ -850,6 +864,45 @@ class PanelService : Service() {
     }
 
     private var lastBroadcastVolts: Pair<Float, String>? = null
+    private var canVolts: Float? = null
+    private var canRaw: Int = -1
+
+    /** Parses ACTION_CAN_BATTERY_VOLTAGE: int extra "Voltage" in tenths of a volt (139 = 13.9V). */
+    private fun handleCanVoltage(intent: Intent) {
+        val ex = intent.extras ?: return
+        val o = ex.get(NWD_VOLT_KEY) ?: ex.get("voltage") ?: return
+        val raw = when (o) {
+            is Int -> o
+            is Long -> o.toInt()
+            is String -> o.trim().toIntOrNull() ?: return
+            is Float -> (o * 10).toInt()
+            is Double -> (o * 10).toInt()
+            else -> return
+        }
+        // Tenths normally; tolerate a firmware that sends millivolts.
+        val v = if (raw > 1000) raw / 1000f else raw / 10f
+        if (plausible(v)) {
+            canRaw = raw
+            canVolts = v
+        }
+    }
+
+    /** ACTION_STREAM_MUSIC: EXTRA_MUSIC_STATE 1 = playing. Keeps the right-knob glyph honest. */
+    private fun handleMusicState(intent: Intent) {
+        val ex = intent.extras ?: return
+        val st = ex.get("EXTRA_MUSIC_STATE") ?: return
+        val playing = when (st) {
+            is Int -> st == 1
+            is Boolean -> st
+            is String -> st.trim() == "1"
+            else -> return
+        }
+        if (playing != isPlayingState) {
+            isPlayingState = playing
+            updatePlayPauseState()
+        }
+    }
+
 
     private fun updateBatteryDisplay() {
         handler.post {
@@ -863,6 +916,10 @@ class PanelService : Service() {
         if (batteryReceiver != null) return
         batteryReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
+                when (intent.action) {
+                    NWD_VOLT_ACTION -> { handleCanVoltage(intent); updateBatteryDisplay(); return }
+                    NWD_MUSIC_ACTION -> { handleMusicState(intent); return }
+                }
                 if (intent.action != Intent.ACTION_BATTERY_CHANGED) {
                     intent.extras?.let { ex ->
                         for (key in ex.keySet()) {
@@ -887,9 +944,14 @@ class PanelService : Service() {
         }
         try {
             val filter = IntentFilter(Intent.ACTION_BATTERY_CHANGED).apply {
+                addAction(NWD_VOLT_ACTION)
+                addAction(NWD_MUSIC_ACTION)
                 VOLT_BROADCASTS.forEach { addAction(it) }
             }
             registerReceiver(batteryReceiver, filter)
+            // If the NWD broadcasts are sticky, pick up the last value immediately.
+            registerReceiver(null, IntentFilter(NWD_VOLT_ACTION))?.let { handleCanVoltage(it) }
+            registerReceiver(null, IntentFilter(NWD_MUSIC_ACTION))?.let { handleMusicState(it) }
         } catch (_: Exception) {}
     }
 
@@ -1054,7 +1116,13 @@ class PanelService : Service() {
         const val ACTION_WAKE = "com.minimal.carlauncher.panel.WAKE"
         const val ACTION_PING = "com.minimal.carlauncher.panel.PING"
 
-        // Filled in once the ADB dump shows the K2401's real voltage source.
+        // Real K2401 / NWD sources (from the unit's logs).
+        const val NWD_VOLT_ACTION = "com.nwd.action.ACTION_CAN_BATTERY_VOLTAGE"
+        const val NWD_VOLT_KEY = "Voltage"
+        const val NWD_MUSIC_ACTION = "com.nwd.android.ACTION_STREAM_MUSIC"
+        const val MCU_VOLUME_KEY = "mcu_system_volume"
+
+        // Fallbacks for other firmware.
         private val EXTRA_VOLT_PATHS = listOf(
             "/sys/class/power_supply/axp2202-ac/voltage_now",
             "/sys/class/power_supply/axp2202-usb/voltage_now",
