@@ -351,15 +351,15 @@ class PanelService : Service() {
         val battSubtitle = TextView(this).apply {
             text = "BATTERY"
             setTextColor(Color.rgb(130, 150, 170))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
             typeface = Typeface.DEFAULT_BOLD
             letterSpacing = 0.14f
             includeFontPadding = false
         }
         val trip = TextView(this).apply {
             text = tripText()
-            setTextColor(Color.rgb(150, 165, 182))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+            setTextColor(Color.rgb(170, 185, 200))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
             typeface = Typeface.MONOSPACE
             includeFontPadding = false
         }
@@ -372,8 +372,8 @@ class PanelService : Service() {
             // Weather: phone-style icon + temperature, plain (no pill). Tap = quick summary.
             val wIcon = WeatherIconView(this@PanelService)
             val wTemp = TextView(this@PanelService).apply {
-                setTextColor(Color.rgb(200, 212, 224))
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+                setTextColor(Color.rgb(210, 220, 232))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
                 typeface = Typeface.DEFAULT_BOLD
                 includeFontPadding = false
             }
@@ -383,15 +383,15 @@ class PanelService : Service() {
                 setPadding(px(4f), px(2f), px(4f), px(2f))
                 isClickable = true
                 setOnClickListener { showWeatherSummary() }
-                addView(wIcon, LinearLayout.LayoutParams(px(18f), px(18f)).apply { rightMargin = px(4f) })
+                addView(wIcon, LinearLayout.LayoutParams(px(24f), px(24f)).apply { rightMargin = px(5f) })
                 addView(wTemp)
             }
             addView(wBox, LinearLayout.LayoutParams(W, W).apply { leftMargin = px(10f) })
             weatherIcon = wIcon
             weatherTemp = wTemp
         }
-        leftCluster.addView(batteryBadge)
-        leftCluster.addView(subRow)
+        leftCluster.addView(batteryBadge, LinearLayout.LayoutParams(W, W))
+        leftCluster.addView(subRow, LinearLayout.LayoutParams(W, W))
         batteryBadgeView = batteryBadge
         battLabelView = battSubtitle
         tripView = trip
@@ -436,14 +436,14 @@ class PanelService : Service() {
         fuelBadge.addView(fText)
         val fLabel = TextView(this).apply {
             setTextColor(Color.rgb(130, 150, 170))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
             typeface = Typeface.DEFAULT_BOLD
             letterSpacing = 0.14f
             includeFontPadding = false
             setPadding(0, px(6f), px(6f), 0)
         }
-        rightCluster.addView(fuelBadge)
-        rightCluster.addView(fLabel)
+        rightCluster.addView(fuelBadge, LinearLayout.LayoutParams(W, W).apply { gravity = Gravity.END })
+        rightCluster.addView(fLabel, LinearLayout.LayoutParams(W, W).apply { gravity = Gravity.END })
         fuelBadgeView = fuelBadge; fuelText = fText; fuelIcon = fIcon; fuelLabel = fLabel
         shownFuelKey = ""
         updateFuelDisplayNow()
