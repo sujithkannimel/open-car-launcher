@@ -22,8 +22,8 @@ import kotlin.math.sin
 /**
  * Draws both rotary-knob decorations across the whole strip, using one shared geometry:
  *
- * - a white disc centred on each physical knob (shows through the knob's clear window;
- *   anything bigger than the window simply hides under the chrome bezel), and
+ * - the volume number / play-pause icon, glowing cyan, in the visible part of each
+ *   knob lens (no filled disc: the lens shows the dark panel), and
  * - a curved arc concentric with that same centre, sitting just outside the bezel,
  *   split into an upper and lower touch zone.
  *
@@ -59,12 +59,27 @@ class KnobsView(
     var showGuides = false
         set(v) { field = v; invalidate() }
 
-    private val discPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
+    /** Knob content colour: same cyan as the arc glow, with a soft glow of its own. */
+    private val accent = Color.rgb(34, 211, 238)
     private val discText = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.rgb(18, 18, 18)
+        color = accent
+        typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+        textAlign = Paint.Align.CENTER
+        setShadowLayer(10f, 0f, 0f, Color.argb(170, 34, 211, 238))
+    }
+    private val captionPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.argb(200, 125, 170, 200)
+        textSize = 11f
         typeface = Typeface.DEFAULT_BOLD
         textAlign = Paint.Align.CENTER
+        letterSpacing = 0.18f
     }
+    private val iconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = accent
+        style = Paint.Style.FILL
+        setShadowLayer(10f, 0f, 0f, Color.argb(170, 34, 211, 238))
+    }
+    private val iconPath = android.graphics.Path()
     private val arcPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = 3f
@@ -137,24 +152,29 @@ class KnobsView(
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         loadGeometry()
-        drawKnob(canvas, lcx, lcy, leftSide = true, leftText, leftTop, leftBottom)
-        drawKnob(canvas, rcx, rcy, leftSide = false, rightText, rightTop, rightBottom)
+        drawKnob(canvas, lcx, lcy, leftSide = true, leftText, leftTop, leftBottom, caption = "VOL")
+        drawKnob(canvas, rcx, rcy, leftSide = false, rightText, rightTop, rightBottom, caption = null)
     }
 
     private fun drawKnob(
         c: Canvas, cx: Float, cy: Float, leftSide: Boolean,
-        text: String, topLabel: String, bottomLabel: String
+        text: String, topLabel: String, bottomLabel: String, caption: String?
     ) {
-        // Disc
-        c.drawCircle(cx, cy, discR, discPaint)
+        // No filled disc: the lens shows the dark panel, and the content glows on it.
 
         // Centre text goes where the screen actually shows through the lens: the knob
         // centres sit near the screen's bottom corners, so the true centre is partly
         // off-screen and text drawn there would be cut in half.
         val (tx, tyc, room) = visibleCentre(cx, cy, min(discR, arcR * 0.6f))
-        discText.textSize = (room * 0.9f).coerceIn(20f, 56f)
-        val ty = tyc - (discText.descent() + discText.ascent()) / 2f
-        c.drawText(text, tx, ty, discText)
+        if (leftSide) {
+            discText.textSize = (room * 0.9f).coerceIn(20f, 54f)
+            val numY = tyc - (if (caption != null) 6f else 0f)
+            val ty = numY - (discText.descent() + discText.ascent()) / 2f
+            c.drawText(text, tx, ty, discText)
+            if (caption != null) c.drawText(caption, tx, ty + 18f, captionPaint)
+        } else {
+            drawPlayPause(c, tx, tyc, (room * 0.55f).coerceIn(14f, 30f), text.contains('\u275A'))
+        }
 
         // Arc: right side of the left knob, left side of the right knob (mirror).
         val (a0, a1) = span(cy)
@@ -207,6 +227,24 @@ class KnobsView(
         val gx = sx / n; val gy = sy / n
         val room = minOf(minOf(gx, w - gx), minOf(gy, h - gy), r - hypot(gx - cx, gy - cy))
         return Triple(gx, gy, room.coerceAtLeast(10f))
+    }
+
+    /** Crisp vector play triangle or pause bars, centred on (x, y), half-size s. */
+    private fun drawPlayPause(c: Canvas, x: Float, y: Float, s: Float, paused: Boolean) {
+        iconPath.reset()
+        if (paused) {
+            val bw = s * 0.42f; val gap = s * 0.36f; val r = bw * 0.35f
+            c.drawRoundRect(x - gap / 2 - bw, y - s, x - gap / 2, y + s, r, r, iconPaint)
+            c.drawRoundRect(x + gap / 2, y - s, x + gap / 2 + bw, y + s, r, r, iconPaint)
+        } else {
+            // Optical centring: shift right a little so the triangle looks centred.
+            val ox = x + s * 0.15f
+            iconPath.moveTo(ox - s * 0.75f, y - s)
+            iconPath.lineTo(ox + s * 0.95f, y)
+            iconPath.lineTo(ox - s * 0.75f, y + s)
+            iconPath.close()
+            c.drawPath(iconPath, iconPaint)
+        }
     }
 
     private fun mirror(deg: Float, leftSide: Boolean) = if (leftSide) deg else 180f - deg
