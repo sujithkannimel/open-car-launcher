@@ -47,6 +47,19 @@ object Prefs {
     const val KEY_PANEL_HEIGHT = "pref_panel_height"
     const val KEY_PANEL_SIDE_MARGIN = "pref_panel_side_margin"
     const val KEY_PANEL_TRANSPARENT = "pref_panel_transparent"
+    const val KEY_KNOB_LX = "pref_knob_left_x"
+    const val KEY_KNOB_LY = "pref_knob_left_y"
+    const val KEY_KNOB_RX = "pref_knob_right_x"
+    const val KEY_KNOB_RY = "pref_knob_right_y"
+    const val KEY_KNOB_DISC = "pref_knob_disc"
+    const val KEY_KNOB_ARC = "pref_knob_arc_radius"
+
+    // Defaults for the K2401 knobs, in panel pixels (1 dp == 1 px at 160 dpi).
+    // Fine-tune on the unit: long-press the panel clock -> adjust mode.
+    const val DEF_KNOB_X = 50      // knob centre, distance from its screen edge
+    const val DEF_KNOB_Y = 118     // knob centre, from the top of the 170 px strip
+    const val DEF_KNOB_DISC = 130  // white disc diameter (excess hides under the bezel)
+    const val DEF_KNOB_ARC = 128   // arc radius from the knob centre
 
     const val COMPASS_AUTO = "auto"
     const val COMPASS_GPS = "gps"
@@ -219,4 +232,38 @@ object Prefs {
     var panelTransparent: Boolean
         get() = sp.getBoolean(KEY_PANEL_TRANSPARENT, false)
         set(value) = sp.edit().putBoolean(KEY_PANEL_TRANSPARENT, value).apply()
+
+    // ------------------------------------------------ knob geometry (panel px)
+    var knobLeftX: Int
+        get() = sp.getInt(KEY_KNOB_LX, DEF_KNOB_X)
+        set(value) = sp.edit().putInt(KEY_KNOB_LX, value).apply()
+
+    var knobLeftY: Int
+        get() = sp.getInt(KEY_KNOB_LY, DEF_KNOB_Y)
+        set(value) = sp.edit().putInt(KEY_KNOB_LY, value).apply()
+
+    /** Distance of the right knob centre from the RIGHT screen edge. */
+    var knobRightX: Int
+        get() = sp.getInt(KEY_KNOB_RX, DEF_KNOB_X)
+        set(value) = sp.edit().putInt(KEY_KNOB_RX, value).apply()
+
+    var knobRightY: Int
+        get() = sp.getInt(KEY_KNOB_RY, DEF_KNOB_Y)
+        set(value) = sp.edit().putInt(KEY_KNOB_RY, value).apply()
+
+    var knobDisc: Int
+        get() = sp.getInt(KEY_KNOB_DISC, DEF_KNOB_DISC)
+        set(value) = sp.edit().putInt(KEY_KNOB_DISC, value).apply()
+
+    var knobArcRadius: Int
+        get() = sp.getInt(KEY_KNOB_ARC, DEF_KNOB_ARC)
+        set(value) = sp.edit().putInt(KEY_KNOB_ARC, value).apply()
+
+    fun resetKnobGeometry() {
+        sp.edit()
+            .remove(KEY_KNOB_LX).remove(KEY_KNOB_LY)
+            .remove(KEY_KNOB_RX).remove(KEY_KNOB_RY)
+            .remove(KEY_KNOB_DISC).remove(KEY_KNOB_ARC)
+            .apply()
+    }
 }

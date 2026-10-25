@@ -77,9 +77,11 @@ class PanelService : Service() {
     private var dens = 1f
 
     // Live-updated views
-    private var volumeDisplay: TextView? = null
+    private var knobsView: KnobsView? = null
     private var batteryDisplay: TextView? = null
-    private var playPauseText: TextView? = null
+    private var adjusting = false
+    private var adjustTarget = 0          // 0 both (mirrored), 1 left, 2 right
+    private var adjustReadout: TextView? = null
     private var isPlayingState = false
     private var lastReportedVolume = -1
 
@@ -199,13 +201,10 @@ class PanelService : Service() {
      * Builds the full-width modern panel matching the dual-knob automotive head unit.
      *
      * Layout (FrameLayout, absolute positioning):
-     * - Left knob: white circle (116dp) at leftMargin=24dp
-     * - Left arc: KnobArcView at leftMargin=124dp (VOL -/+)
-     * - Right arc: KnobArcView at rightMargin=124dp (Track Next/Prev)
-     * - Right knob: white circle at rightMargin=24dp (play/pause)
-     * - Battery pill: lower left at leftMargin=196dp
+     * - KnobsView (full strip): white disc on each knob centre + concentric arc (VOL -/+,
+     *   Track Next/Prev). Geometry from Prefs, tuned via long-press on the clock.
+     * - Battery pill / clock: placed just past each arc, so they follow the knob geometry.
      * - Center buttons: Home, Apps, Nav, Phone (gradient squircle, 62dp)
-     * - Clock: lower right at rightMargin=196dp
      */
     private fun addModernPanel(real: DisplayMetrics) {
         val panelHeightPx = Prefs.panelHeight    // stored in px, default 170
@@ -221,115 +220,38 @@ class PanelService : Service() {
         }
         root.addView(topDivider, FrameLayout.LayoutParams(M, px(1.5f), Gravity.TOP))
 
-        // Knob sizing & alignment calibrated to physical rotary bezel
-        val knobSize = px(116f)
-        val arcWidth = px(64f)
-        val arcHeight = px(122f)
-
-        // 1. LEFT KNOB: White illuminated circular aperture with volume digit
-        val leftKnobCircle = FrameLayout(this).apply {
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(Color.WHITE)
-            }
-            elevation = px(6f).toFloat()
-            isClickable = true
-            isFocusable = true
-            setOnClickListener {
-                it.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+        // 1+2. KNOBS: discs + concentric arcs, one shared geometry (see KnobsView / Prefs).
+        val knobs = KnobsView(
+            context = this,
+            leftTop = "\u2212",
+            leftBottom = "+",
+            rightTop = "\u25B6|",
+            rightBottom = "|\u25C0",
+            onLeftTop = { adjustVolume(up = false) },
+            onLeftBottom = { adjustVolume(up = true) },
+            onRightTop = { sendMediaKey(KeyEvent.KEYCODE_MEDIA_NEXT) },
+            onRightBottom = { sendMediaKey(KeyEvent.KEYCODE_MEDIA_PREVIOUS) },
+            onLeftDisc = {
                 val audio = am ?: (getSystemService(AUDIO_SERVICE) as AudioManager)
                 audio.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_SAME, AudioManager.FLAG_SHOW_UI)
                 updateVolumeDisplay()
-            }
-        }
-
-        val volValue = TextView(this).apply {
-            text = getCurrentVolumeDisplay()
-            setTextColor(Color.rgb(18, 18, 18))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 38f)
-            typeface = Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER
-            includeFontPadding = false
-        }
-        volumeDisplay = volValue
-        leftKnobCircle.addView(volValue, FrameLayout.LayoutParams(M, M, Gravity.CENTER))
-
-        val leftParams = FrameLayout.LayoutParams(knobSize, knobSize, Gravity.START or Gravity.TOP).apply {
-            leftMargin = px(24f)
-            topMargin = px(6f)
-        }
-        root.addView(leftKnobCircle, leftParams)
-
-        // Curved arc hugging the outer rim of the left knob: Top is "-", Bottom is "+"
-        val leftArc = KnobArcView(
-            context = this,
-            isLeftKnob = true,
-            topLabel = "-",
-            bottomLabel = "+",
-            midLabel = null,
-            onTopClick = { adjustVolume(up = false) },
-            onBottomClick = { adjustVolume(up = true) }
-        )
-        val leftArcParams = FrameLayout.LayoutParams(arcWidth, arcHeight, Gravity.START or Gravity.TOP).apply {
-            leftMargin = px(124f)
-            topMargin = px(2f)
-        }
-        root.addView(leftArc, leftArcParams)
-
-        // 2. RIGHT KNOB: Track arc + white play/pause aperture
-        val rightArc = KnobArcView(
-            context = this,
-            isLeftKnob = false,
-            topLabel = "\u25B6|",
-            bottomLabel = "|\u25C0",
-            midLabel = null,
-            onTopClick = {
-                sendMediaKey(KeyEvent.KEYCODE_MEDIA_NEXT)
-                Toast.makeText(this, "Next track", Toast.LENGTH_SHORT).show()
             },
-            onBottomClick = {
-                sendMediaKey(KeyEvent.KEYCODE_MEDIA_PREVIOUS)
-                Toast.makeText(this, "Previous track", Toast.LENGTH_SHORT).show()
-            }
-        )
-        val rightArcParams = FrameLayout.LayoutParams(arcWidth, arcHeight, Gravity.END or Gravity.TOP).apply {
-            rightMargin = px(124f)
-            topMargin = px(2f)
-        }
-        root.addView(rightArc, rightArcParams)
-
-        val rightKnobCircle = FrameLayout(this).apply {
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(Color.WHITE)
-            }
-            elevation = px(6f).toFloat()
-            isClickable = true
-            isFocusable = true
-            setOnClickListener {
-                it.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+            onRightDisc = {
                 sendMediaKey(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
                 isPlayingState = !isPlayingState
                 updatePlayPauseState()
-            }
+            },
+        ).apply {
+            leftText = getCurrentVolumeDisplay()
+            rightText = playGlyph()
+            showGuides = adjusting
         }
+        knobsView = knobs
+        root.addView(knobs, FrameLayout.LayoutParams(M, M))
 
-        val mediaIcon = TextView(this).apply {
-            text = if (isPlayingState) "\u275A\u275A" else "\u25B6"
-            setTextColor(Color.rgb(18, 18, 18))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 36f)
-            typeface = Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER
-            includeFontPadding = false
-        }
-        playPauseText = mediaIcon
-        rightKnobCircle.addView(mediaIcon, FrameLayout.LayoutParams(M, M, Gravity.CENTER))
-
-        val rightParams = FrameLayout.LayoutParams(knobSize, knobSize, Gravity.END or Gravity.TOP).apply {
-            rightMargin = px(24f)
-            topMargin = px(6f)
-        }
-        root.addView(rightKnobCircle, rightParams)
+        // Side clusters sit just past each arc's labels, so they follow any recalibration.
+        val sideLeft = Prefs.knobLeftX + Prefs.knobArcRadius + 46
+        val sideRight = Prefs.knobRightX + Prefs.knobArcRadius + 46
 
         // 3. LOWER LEFT: Battery Voltage Pill Badge
         val leftCluster = LinearLayout(this).apply {
@@ -351,7 +273,7 @@ class PanelService : Service() {
             isFocusable = true
             setOnClickListener {
                 val curV = getBatteryVoltageDisplay()
-                Toast.makeText(this@PanelService, "Battery Voltage: $curV", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this@PanelService, "Voltage $curV\nsource: $voltSource", Toast.LENGTH_LONG).show()
                 updateBatteryDisplay()
             }
         }
@@ -381,9 +303,9 @@ class PanelService : Service() {
         leftCluster.addView(battSubtitle)
 
         val leftClusterParams = FrameLayout.LayoutParams(W, W, Gravity.START or Gravity.CENTER_VERTICAL).apply {
-            leftMargin = px(196f)
+            leftMargin = sideLeft
         }
-        root.addView(leftCluster, leftClusterParams)
+        if (!adjusting) root.addView(leftCluster, leftClusterParams)
 
         // 4. CENTER: Quick-Launcher Buttons (gradient squircle)
         val centerBar = LinearLayout(this).apply {
@@ -435,7 +357,11 @@ class PanelService : Service() {
         centerBar.addView(btnNav, margin(btnSize, px(8f)))
         centerBar.addView(btnPhone, margin(btnSize, px(8f)))
 
-        root.addView(centerBar, FrameLayout.LayoutParams(W, h, Gravity.CENTER))
+        if (adjusting) {
+            root.addView(buildAdjustBar(), FrameLayout.LayoutParams(W, h, Gravity.CENTER))
+        } else {
+            root.addView(centerBar, FrameLayout.LayoutParams(W, h, Gravity.CENTER))
+        }
 
         // 5. LOWER RIGHT: Clock & Date
         val rightCluster = LinearLayout(this).apply {
@@ -466,11 +392,19 @@ class PanelService : Service() {
 
         rightCluster.addView(timeClock)
         rightCluster.addView(dateClock)
+        // Long-press the clock to line the knob graphics up with the physical knobs.
+        rightCluster.isLongClickable = true
+        rightCluster.setOnLongClickListener {
+            it.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+            adjusting = true
+            build()
+            true
+        }
 
         val rightClusterParams = FrameLayout.LayoutParams(W, W, Gravity.END or Gravity.CENTER_VERTICAL).apply {
-            rightMargin = px(196f)
+            rightMargin = sideRight
         }
-        root.addView(rightCluster, rightClusterParams)
+        if (!adjusting) root.addView(rightCluster, rightClusterParams)
 
         try {
             wm?.addView(root, overlayParams(M, panelHeightPx, real.heightPixels - panelHeightPx))
@@ -478,6 +412,131 @@ class PanelService : Service() {
         } catch (e: Exception) {
             log("panel addView failed: $e")
         }
+    }
+
+    // --------------------------------------------------------------------- knob adjust mode
+
+    private fun playGlyph() = if (isPlayingState) "\u275A\u275A" else "\u25B6"
+
+    /**
+     * Replaces the centre buttons with nudge controls while adjusting. The discs sit under
+     * the physical knobs where touch doesn't reach, so everything is moved with buttons.
+     * Each press is 2 px; holding repeats. Values save immediately.
+     */
+    private fun buildAdjustBar(): View {
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+        }
+        val readout = TextView(this).apply {
+            setTextColor(Color.rgb(255, 64, 129))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            typeface = Typeface.MONOSPACE
+            gravity = Gravity.CENTER
+        }
+        adjustReadout = readout
+        refreshReadout()
+        col.addView(readout, LinearLayout.LayoutParams(W, W).apply { bottomMargin = px(6f) })
+
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        fun targetText() = when (adjustTarget) { 1 -> "LEFT"; 2 -> "RIGHT"; else -> "BOTH" }
+        row.addView(adjustButton(targetText(), wide = true, repeat = false) {
+            adjustTarget = (adjustTarget + 1) % 3
+            (it as TextView).text = targetText()
+            refreshReadout()
+        })
+        row.addView(adjustButton("\u25C0") { nudge(dx = -2) })
+        row.addView(adjustButton("\u25B2") { nudge(dy = -2) })
+        row.addView(adjustButton("\u25BC") { nudge(dy = 2) })
+        row.addView(adjustButton("\u25B6") { nudge(dx = 2) })
+        row.addView(adjustButton("\u25CB\u2212") { Prefs.knobDisc = (Prefs.knobDisc - 2).coerceAtLeast(40); knobChanged() })
+        row.addView(adjustButton("\u25CB+") { Prefs.knobDisc = (Prefs.knobDisc + 2).coerceAtMost(220); knobChanged() })
+        row.addView(adjustButton("\u25E0\u2212") { Prefs.knobArcRadius = (Prefs.knobArcRadius - 2).coerceAtLeast(40); knobChanged() })
+        row.addView(adjustButton("\u25E0+") { Prefs.knobArcRadius = (Prefs.knobArcRadius + 2).coerceAtMost(260); knobChanged() })
+        row.addView(adjustButton("RESET", wide = true, repeat = false) { Prefs.resetKnobGeometry(); knobChanged() })
+        row.addView(adjustButton("DONE", wide = true, repeat = false) {
+            adjusting = false
+            build()
+        })
+        col.addView(row)
+        return col
+    }
+
+    /**
+     * dx is in screen terms for LEFT / RIGHT (positive = move right). With BOTH selected the
+     * knobs move as a mirrored pair: ▶ moves both toward the screen centre, ◀ both toward
+     * their edges. Prefs.knobRightX is measured from the right edge.
+     */
+    private fun nudge(dx: Int = 0, dy: Int = 0) {
+        if (adjustTarget != 2) {
+            Prefs.knobLeftX = (Prefs.knobLeftX + dx).coerceIn(-100, 400)
+            Prefs.knobLeftY = (Prefs.knobLeftY + dy).coerceIn(-100, 300)
+        }
+        if (adjustTarget != 1) {
+            // BOTH: mirrored (same distance from each edge). RIGHT alone: screen direction.
+            val rx = if (adjustTarget == 0) dx else -dx
+            Prefs.knobRightX = (Prefs.knobRightX + rx).coerceIn(-100, 400)
+            Prefs.knobRightY = (Prefs.knobRightY + dy).coerceIn(-100, 300)
+        }
+        knobChanged()
+    }
+
+    private fun knobChanged() {
+        knobsView?.invalidate()
+        refreshReadout()
+    }
+
+    private fun refreshReadout() {
+        adjustReadout?.text = String.format(
+            Locale.US, "L x%d y%d   R x%d y%d   disc %d   arc %d",
+            Prefs.knobLeftX, Prefs.knobLeftY, Prefs.knobRightX, Prefs.knobRightY,
+            Prefs.knobDisc, Prefs.knobArcRadius
+        )
+    }
+
+    private fun adjustButton(
+        label: String,
+        wide: Boolean = false,
+        repeat: Boolean = true,
+        onClick: (View) -> Unit
+    ): TextView {
+        val tv = TextView(this).apply {
+            text = label
+            setTextColor(Color.WHITE)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, if (wide) 13f else 18f)
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            background = GradientDrawable().apply {
+                setColor(Color.rgb(38, 46, 58))
+                setStroke(px(1f), Color.argb(90, 255, 255, 255))
+                cornerRadius = px(10f).toFloat()
+            }
+        }
+        val tick = object : Runnable {
+            override fun run() { onClick(tv); handler.postDelayed(this, 90L) }
+        }
+        tv.setOnTouchListener { v, e ->
+            when (e.actionMasked) {
+                android.view.MotionEvent.ACTION_DOWN -> {
+                    v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                    v.alpha = 0.6f
+                    onClick(tv)
+                    if (repeat) handler.postDelayed(tick, 400L)
+                }
+                android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                    v.alpha = 1f
+                    handler.removeCallbacks(tick)
+                }
+            }
+            true
+        }
+        tv.layoutParams = LinearLayout.LayoutParams(px(if (wide) 64f else 46f), px(46f)).apply {
+            leftMargin = px(3f); rightMargin = px(3f)
+        }
+        return tv
     }
 
     // --------------------------------------------------------------------- modern button helper
@@ -597,9 +656,7 @@ class PanelService : Service() {
     private fun updateVolumeDisplay() {
         handler.post {
             val vol = getCurrentVolumeDisplay()
-            if (volumeDisplay?.text != vol) {
-                volumeDisplay?.text = vol
-            }
+            knobsView?.leftText = vol
         }
     }
 
@@ -625,7 +682,7 @@ class PanelService : Service() {
 
     private fun updatePlayPauseState() {
         handler.post {
-            playPauseText?.text = if (isPlayingState) "\u275A\u275A" else "\u25B6"
+            knobsView?.rightText = playGlyph()
         }
     }
 
@@ -713,7 +770,7 @@ class PanelService : Service() {
      * Reads the car battery voltage.
      * Primary: BatteryManager.EXTRA_VOLTAGE from the sticky BATTERY_CHANGED broadcast.
      * Fallback: Settings.System/Global keys for MCU hardware voltages.
-     * Last resort: show '11.9V' rather than '--V'.
+     * No source: shows '--.-V' (never a made-up number).
      */
     /**
      * Reads the car battery / ACC input voltage from every known source on the K2401.
@@ -724,90 +781,75 @@ class PanelService : Service() {
      *    voltage here as microvolts (e.g. 12300000 = 12.3V). The AXP2202 PMIC and generic
      *    battery/ac/usb nodes are all tried.
      * 3. Settings.System / Settings.Global keys used by various MCU firmware versions.
-     * 4. Hardcoded '11.9V' as a last resort (not '--V', so the pill never looks broken).
+     * 4. A plausible 'vol*' extra from a vendor voltage broadcast.
+     * 5. Otherwise '--.-V'. Tap the pill to see which source was used.
      */
+    /** Where the last voltage reading came from; shown when the pill is tapped. */
+    private var voltSource = "none"
+
+    private fun fmtVolts(v: Float) = String.format(Locale.US, "%.1fV", v)
+
+    /** Converts a raw reading in µV, mV, tenths or volts to volts. */
+    private fun toVolts(raw: Long): Float = when {
+        raw > 1_000_000 -> raw / 1_000_000f
+        raw > 1_000 -> raw / 1_000f
+        raw > 100 -> raw / 10f
+        else -> raw.toFloat()
+    }
+
+    private fun plausible(v: Float) = v in 6.0f..18.5f
+
     private fun getBatteryVoltageDisplay(): String {
         // --- Source 1: BatteryManager sticky broadcast ---
         try {
-            val batteryIntent = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-            if (batteryIntent != null) {
-                val mv = batteryIntent.getIntExtra(BatteryManager.EXTRA_VOLTAGE, -1)
-                if (mv > 0) {
-                    val volts = when {
-                        mv > 1000 -> mv / 1000f
-                        mv > 100 -> mv / 10f
-                        else -> mv.toFloat()
-                    }
-                    if (volts in 8.0f..18.0f) {
-                        return String.format(Locale.US, "%.1fV", volts)
-                    }
-                }
+            val bi = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+            val mv = bi?.getIntExtra(BatteryManager.EXTRA_VOLTAGE, -1) ?: -1
+            if (mv > 0) {
+                val v = toVolts(mv.toLong())
+                if (plausible(v)) { voltSource = "BatteryManager ($mv)"; return fmtVolts(v) }
             }
         } catch (_: Exception) {}
 
-        // --- Source 2: Linux sysfs power_supply nodes (Allwinner T507 / AXP2202 PMIC) ---
-        // voltage_now is in microvolts on most kernels (12300000 = 12.3V).
-        // Some Allwinner kernels report millivolts (12300 = 12.3V) or raw ADC.
-        val sysfsPaths = listOf(
-            "/sys/class/power_supply/battery/voltage_now",
-            "/sys/class/power_supply/ac/voltage_now",
-            "/sys/class/power_supply/usb/voltage_now",
-            "/sys/class/power_supply/axp2202-battery/voltage_now",
-            "/sys/class/power_supply/axp2202-ac/voltage_now",
-            "/sys/class/power_supply/axp2202-usb/voltage_now",
-            "/sys/class/power_supply/axp803-ac/voltage_now",
-            "/sys/class/power_supply/axp803-battery/voltage_now",
-            "/sys/class/power_supply/battery/batt_vol",
-            "/sys/class/power_supply/ac/voltage_max"
-        )
-        for (path in sysfsPaths) {
-            try {
-                val file = java.io.File(path)
-                if (file.exists() && file.canRead()) {
-                    val raw = file.readText().trim().toLongOrNull() ?: continue
-                    if (raw <= 0) continue
-                    val volts = when {
-                        raw > 1_000_000 -> raw / 1_000_000f  // microvolts -> volts
-                        raw > 1_000 -> raw / 1_000f           // millivolts -> volts
-                        raw > 100 -> raw / 10f                 // tenths -> volts
-                        else -> raw.toFloat()
-                    }
-                    if (volts in 8.0f..18.0f) {
-                        return String.format(Locale.US, "%.1fV", volts)
-                    }
+        // --- Source 2: explicit sysfs paths first, then every power_supply node ---
+        val paths = LinkedHashSet<String>(EXTRA_VOLT_PATHS)
+        try {
+            java.io.File("/sys/class/power_supply").listFiles()?.forEach { dir ->
+                for (n in listOf("voltage_now", "voltage_avg", "batt_vol", "input_voltage")) {
+                    paths.add("${dir.path}/$n")
                 }
+            }
+        } catch (_: Exception) {}
+        for (path in paths) {
+            try {
+                val f = java.io.File(path)
+                if (!f.canRead()) continue
+                val raw = f.readText().trim().split(Regex("\\s+")).first().toLongOrNull() ?: continue
+                if (raw <= 0) continue
+                val v = toVolts(raw)
+                if (plausible(v)) { voltSource = "$path ($raw)"; return fmtVolts(v) }
             } catch (_: Exception) {}
         }
 
         // --- Source 3: Settings.System / Settings.Global (MCU firmware keys) ---
-        val candidateKeys = listOf(
-            "car_battery_voltage",
-            "battery_voltage",
-            "car_voltage",
-            "voltage_battery",
-            "system_battery_voltage",
-            "mcu_battery_voltage",
-            "battery_vol",
-            "car_vol",
-            "nwd_battery_voltage",
-            "nwd_voltage"
-        )
-        for (k in candidateKeys) {
+        for (k in VOLT_SETTING_KEYS) {
             try {
-                val vStr = Settings.System.getString(contentResolver, k)
-                    ?: Settings.Global.getString(contentResolver, k)
-                if (!vStr.isNullOrBlank()) {
-                    val clean = vStr.replace("V", "", ignoreCase = true).trim().toFloatOrNull()
-                    if (clean != null && clean in 8.0f..18.0f) {
-                        return String.format(Locale.US, "%.1fV", clean)
-                    }
-                }
+                val str = Settings.System.getString(contentResolver, k)
+                    ?: Settings.Global.getString(contentResolver, k) ?: continue
+                val num = Regex("[0-9]+(\\.[0-9]+)?").find(str)?.value ?: continue
+                val v = if (num.contains('.')) num.toFloat() else toVolts(num.toLong())
+                if (plausible(v)) { voltSource = "settings:$k ($str)"; return fmtVolts(v) }
             } catch (_: Exception) {}
         }
 
-        // --- Source 4: fallback ---
-        return "11.9V"
+        // --- Source 4: value pushed by a firmware broadcast (see registerBatteryReceiver) ---
+        lastBroadcastVolts?.let { if (plausible(it.first)) { voltSource = it.second; return fmtVolts(it.first) } }
+
+        // No real source: say so instead of showing a made-up number.
+        voltSource = "none found"
+        return "--.-V"
     }
+
+    private var lastBroadcastVolts: Pair<Float, String>? = null
 
     private fun updateBatteryDisplay() {
         handler.post {
@@ -821,11 +863,33 @@ class PanelService : Service() {
         if (batteryReceiver != null) return
         batteryReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
+                if (intent.action != Intent.ACTION_BATTERY_CHANGED) {
+                    intent.extras?.let { ex ->
+                        for (key in ex.keySet()) {
+                            if (!key.contains("vol", ignoreCase = true)) continue
+                            val v = when (val o = ex.get(key)) {
+                                is Float -> o
+                                is Double -> o.toFloat()
+                                is Int -> toVolts(o.toLong())
+                                is Long -> toVolts(o)
+                                is String -> o.filter { it.isDigit() || it == '.' }.toFloatOrNull()
+                                else -> null
+                            } ?: continue
+                            if (plausible(v)) {
+                                lastBroadcastVolts = v to "broadcast ${intent.action} [$key]"
+                                break
+                            }
+                        }
+                    }
+                }
                 updateBatteryDisplay()
             }
         }
         try {
-            registerReceiver(batteryReceiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+            val filter = IntentFilter(Intent.ACTION_BATTERY_CHANGED).apply {
+                VOLT_BROADCASTS.forEach { addAction(it) }
+            }
+            registerReceiver(batteryReceiver, filter)
         } catch (_: Exception) {}
     }
 
@@ -976,9 +1040,9 @@ class PanelService : Service() {
         remove(handle)
         panel = null
         handle = null
-        volumeDisplay = null
+        knobsView = null
         batteryDisplay = null
-        playPauseText = null
+        adjustReadout = null
     }
 
     companion object {
@@ -989,6 +1053,23 @@ class PanelService : Service() {
 
         const val ACTION_WAKE = "com.minimal.carlauncher.panel.WAKE"
         const val ACTION_PING = "com.minimal.carlauncher.panel.PING"
+
+        // Filled in once the ADB dump shows the K2401's real voltage source.
+        private val EXTRA_VOLT_PATHS = listOf(
+            "/sys/class/power_supply/axp2202-ac/voltage_now",
+            "/sys/class/power_supply/axp2202-usb/voltage_now",
+            "/sys/class/power_supply/axp2202-battery/voltage_now",
+        )
+        private val VOLT_SETTING_KEYS = listOf(
+            "car_battery_voltage", "battery_voltage", "car_voltage", "voltage_battery",
+            "system_battery_voltage", "mcu_battery_voltage", "battery_vol", "car_vol",
+            "nwd_battery_voltage", "nwd_voltage", "acc_voltage", "power_voltage",
+        )
+        private val VOLT_BROADCASTS = listOf(
+            "com.nwd.action.BATTERY_VOLTAGE",
+            "com.nwd.action.VOLTAGE_CHANGED",
+            "com.nwd.mcu.voltage",
+        )
 
         private const val PANEL_BG = 0xFF0D1117.toInt()
         private const val PANEL_BG_TRANSPARENT = 0x80000000.toInt()
