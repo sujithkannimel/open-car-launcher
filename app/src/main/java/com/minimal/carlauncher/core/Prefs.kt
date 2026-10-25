@@ -55,7 +55,7 @@ object Prefs {
     const val KEY_KNOB_ARC = "pref_knob_arc_radius"
 
     // Defaults for the K2401 knobs, in panel pixels (1 dp == 1 px at 160 dpi).
-    // Fine-tune on the unit: long-press the panel clock -> adjust mode.
+    // Fine-tune on the unit: long-press the battery pill -> adjust mode.
     const val DEF_KNOB_X = 50      // knob centre, distance from its screen edge
     const val DEF_KNOB_Y = 118     // knob centre, from the top of the 170 px strip
     const val DEF_KNOB_DISC = 130  // white disc diameter (excess hides under the bezel)

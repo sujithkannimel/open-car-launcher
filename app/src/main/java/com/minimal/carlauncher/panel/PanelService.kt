@@ -31,7 +31,6 @@ import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.LinearLayout
-import android.widget.TextClock
 import android.widget.TextView
 import android.widget.Toast
 import com.minimal.carlauncher.core.Prefs
@@ -202,8 +201,8 @@ class PanelService : Service() {
      *
      * Layout (FrameLayout, absolute positioning):
      * - KnobsView (full strip): white disc on each knob centre + concentric arc (VOL -/+,
-     *   Track Next/Prev). Geometry from Prefs, tuned via long-press on the clock.
-     * - Battery pill / clock: placed just past each arc, so they follow the knob geometry.
+     *   Track Next/Prev). Geometry from Prefs, tuned via long-press on the battery pill.
+     * - Battery pill: just past the left arc. Long-press it for knob adjust mode.
      * - Center buttons: Home, Apps, Nav, Phone (gradient squircle, 62dp)
      */
     private fun addModernPanel(real: DisplayMetrics) {
@@ -251,7 +250,6 @@ class PanelService : Service() {
 
         // Side clusters sit just past each arc's labels, so they follow any recalibration.
         val sideLeft = Prefs.knobLeftX + Prefs.knobArcRadius + 46
-        val sideRight = Prefs.knobRightX + Prefs.knobArcRadius + 46
 
         // 3. LOWER LEFT: Battery Voltage Pill Badge
         val leftCluster = LinearLayout(this).apply {
@@ -275,6 +273,13 @@ class PanelService : Service() {
                 val curV = getBatteryVoltageDisplay()
                 Toast.makeText(this@PanelService, "Voltage $curV\nsource: $voltSource", Toast.LENGTH_LONG).show()
                 updateBatteryDisplay()
+            }
+            // Long-press the pill to line the knob graphics up with the physical knobs.
+            setOnLongClickListener {
+                it.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                adjusting = true
+                build()
+                true
             }
         }
 
@@ -362,49 +367,6 @@ class PanelService : Service() {
         } else {
             root.addView(centerBar, FrameLayout.LayoutParams(W, h, Gravity.CENTER))
         }
-
-        // 5. LOWER RIGHT: Clock & Date
-        val rightCluster = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.END or Gravity.CENTER_VERTICAL
-            setPadding(0, 0, px(6f), 0)
-        }
-
-        val timeClock = TextClock(this).apply {
-            setFormat12Hour("h:mm")
-            setFormat24Hour("HH:mm")
-            setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 48f)
-            typeface = Typeface.DEFAULT_BOLD
-            gravity = Gravity.END
-            includeFontPadding = false
-        }
-
-        val dateClock = TextClock(this).apply {
-            setFormat12Hour("EEE, d MMM")
-            setFormat24Hour("EEE, d MMM")
-            setTextColor(Color.rgb(180, 195, 210))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
-            typeface = Typeface.DEFAULT
-            gravity = Gravity.END
-            includeFontPadding = false
-        }
-
-        rightCluster.addView(timeClock)
-        rightCluster.addView(dateClock)
-        // Long-press the clock to line the knob graphics up with the physical knobs.
-        rightCluster.isLongClickable = true
-        rightCluster.setOnLongClickListener {
-            it.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-            adjusting = true
-            build()
-            true
-        }
-
-        val rightClusterParams = FrameLayout.LayoutParams(W, W, Gravity.END or Gravity.CENTER_VERTICAL).apply {
-            rightMargin = sideRight
-        }
-        if (!adjusting) root.addView(rightCluster, rightClusterParams)
 
         try {
             wm?.addView(root, overlayParams(M, panelHeightPx, real.heightPixels - panelHeightPx))
