@@ -122,7 +122,7 @@ jobs:
           generate_release_notes: true
           prerelease: ${{ startsWith(github.ref_name, 'v0.') }}
           body: |
-            ${{ steps.signing.outputs.signed == 'true' && 'Signed release build.' || '**Debug-signed build.** Early development: no release keystore is configured yet, so the in-app updater cannot upgrade over this build. Uninstall any previous version before installing.' }}
+            ${{ steps.signing.outputs.signed == 'true' && 'Signed release build.' || 'Signed with the project''s fixed debug key: installs over any previous build from this repo, and the in-app updater can upgrade to it.' }}
 
       - name: Clean up signing material
         if: always()
