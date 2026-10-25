@@ -33,6 +33,14 @@ android {
     }
 
     signingConfigs {
+        // Fixed debug key, committed on purpose: every CI build is signed the same way,
+        // so a newer debug APK installs over the old one instead of failing to install.
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
         if (keystoreProps.isNotEmpty()) {
             create("release") {
                 storeFile = file(keystoreProps.getProperty("storeFile"))
@@ -53,6 +61,7 @@ android {
             }
         }
         debug {
+            signingConfig = signingConfigs.getByName("debug")
             // No applicationIdSuffix on purpose: a debug install must be upgradable by a release APK.
             isMinifyEnabled = false
         }

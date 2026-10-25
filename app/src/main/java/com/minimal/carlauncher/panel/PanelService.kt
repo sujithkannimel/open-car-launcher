@@ -397,7 +397,7 @@ class PanelService : Service() {
 
     /**
      * dx is in screen terms for LEFT / RIGHT (positive = move right). With BOTH selected the
-     * knobs move as a mirrored pair: ▶ moves both toward the screen centre, ◀ both toward
+     * knobs move as a mirrored pair: right-arrow moves both toward the screen centre, left-arrow both toward
      * their edges. Prefs.knobRightX is measured from the right edge.
      */
     private fun nudge(dx: Int = 0, dy: Int = 0) {
@@ -750,7 +750,7 @@ class PanelService : Service() {
 
     private fun fmtVolts(v: Float) = String.format(Locale.US, "%.1fV", v)
 
-    /** Converts a raw reading in µV, mV, tenths or volts to volts. */
+    /** Converts a raw reading in uV, mV, tenths or volts to volts. */
     private fun toVolts(raw: Long): Float = when {
         raw > 1_000_000 -> raw / 1_000_000f
         raw > 1_000 -> raw / 1_000f
