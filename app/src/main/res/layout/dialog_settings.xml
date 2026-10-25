@@ -236,6 +236,20 @@
             android:textColor="@color/cockpit_text_dim"
             android:textSize="12sp" />
 
+        <CheckBox
+            android:id="@+id/checkStayOnConnect"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="48dp"
+            android:text="@string/settings_stay_on_connect" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/settings_stay_on_connect_hint"
+            android:textColor="@color/cockpit_text_dim"
+            android:textSize="12sp" />
+
         <View
             android:layout_width="match_parent"
             android:layout_height="1dp"

@@ -157,6 +157,10 @@ object SettingsDialog {
             onPrefsChanged()
         }
 
+        val stayCheck = view.findViewById<CheckBox>(R.id.checkStayOnConnect)
+        stayCheck.isChecked = Prefs.stayOnConnect
+        stayCheck.setOnCheckedChangeListener { _, checked -> Prefs.stayOnConnect = checked }
+
         view.findViewById<Button>(R.id.btnResetDock).setOnClickListener {
             onDockReset()
             Toast.makeText(activity, R.string.dock_reset, Toast.LENGTH_SHORT).show()

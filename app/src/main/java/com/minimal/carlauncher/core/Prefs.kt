@@ -52,6 +52,7 @@ object Prefs {
     const val KEY_GPS_ODO = "pref_gps_odo_km"
     const val KEY_FUEL = "pref_fuel_state"
     const val KEY_WEATHER_JSON = "pref_weather_json"
+    const val KEY_STAY_ON_CONNECT = "pref_stay_on_connect"
     const val KEY_WEATHER_AT = "pref_weather_at"
     const val KEY_TRIP_LAST_SEEN = "pref_trip_last_seen"
     const val KEY_KNOB_LX = "pref_knob_left_x"
@@ -281,6 +282,11 @@ object Prefs {
         ).apply()
 
     fun resetFuel() { sp.edit().remove(KEY_FUEL).apply() }
+
+    /** Keep the current screen when ZLink jumps to the front on phone connect. */
+    var stayOnConnect: Boolean
+        get() = sp.getBoolean(KEY_STAY_ON_CONNECT, true)
+        set(value) = sp.edit().putBoolean(KEY_STAY_ON_CONNECT, value).apply()
 
     /** Last Open-Meteo reply and when it was fetched, so weather shows at once after a restart. */
     var weatherJson: String

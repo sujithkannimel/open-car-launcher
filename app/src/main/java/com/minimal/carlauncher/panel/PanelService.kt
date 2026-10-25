@@ -111,6 +111,12 @@ class PanelService : Service() {
     private var weatherTemp: TextView? = null
     private var weather: Weather? = null
     @Volatile private var weatherFetching = false
+
+    // Stay on the current screen when ZLink auto-jumps to the front on phone connect.
+    private var zlinkReceiver: BroadcastReceiver? = null
+    private var stayPrevApp: String? = null
+    private var stayUntilMs = 0L
+    private var stayBounces = 0
     private var locMgr: android.location.LocationManager? = null
     private var lastFix: android.location.Location? = null
     private var pendingKm = 0.0
@@ -178,6 +184,7 @@ class PanelService : Service() {
         registerBatteryReceiver()
         registerVolumeReceiver()
         registerVolumeObserver()
+        registerZlinkReceiver()
         lastHeartbeatMs = 0L
         tripHeartbeat()
         startGpsOdometer()
@@ -227,6 +234,8 @@ class PanelService : Service() {
         unregisterBatteryReceiver()
         unregisterVolumeReceiver()
         unregisterVolumeObserver()
+        zlinkReceiver?.let { try { unregisterReceiver(it) } catch (_: Exception) {} }
+        zlinkReceiver = null
         try { locMgr?.removeUpdates(gpsListener) } catch (_: Exception) {}
         if (pendingKm > 0) { Prefs.gpsOdoKm = Prefs.gpsOdoKm + pendingKm; pendingKm = 0.0 }
         clear()
@@ -1172,6 +1181,61 @@ class PanelService : Service() {
         }
     }
 
+    // --------------------------------------------------------------------- stay on screen (ZLink)
+
+    /**
+     * ZLink broadcasts action "com.zjinnova.zlink" with status=ACTION_ZJ_PHONEFOUND when a
+     * phone connects, then immediately starts its own MainActivity. We remember the app that
+     * was on screen and, if ZLink takes the front within STAY_WINDOW_MS, put it back. Outside
+     * that window (floating button, Phone Link tile) ZLink opens normally.
+     */
+    private fun registerZlinkReceiver() {
+        if (zlinkReceiver != null) return
+        zlinkReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                val status = intent.getStringExtra("status") ?: return
+                if (!Prefs.stayOnConnect) return
+                if (status == "ACTION_ZJ_PHONEFOUND" || (status == "CONNECTED" && stayUntilMs == 0L)) {
+                    val top = currentTopApp()
+                    stayPrevApp = top?.takeIf { it != ZLINK_PKG }
+                        ?: stayPrevApp ?: packageName
+                    stayUntilMs = SystemClock.uptimeMillis() + STAY_WINDOW_MS
+                    stayBounces = 0
+                    log("zlink $status -- will keep $stayPrevApp in front")
+                    for (d in longArrayOf(700, 1500, 3000, 5000, 8000, STAY_WINDOW_MS)) {
+                        handler.postDelayed({ bounceBackIfZlink() }, d)
+                    }
+                }
+            }
+        }
+        try {
+            registerReceiver(zlinkReceiver, IntentFilter(ZLINK_ACTION))
+        } catch (_: Exception) {}
+    }
+
+    private fun currentTopApp(): String? = try {
+        Settings.System.getString(contentResolver, "key_top_app")
+    } catch (_: Exception) { null }
+
+    private fun bounceBackIfZlink() {
+        if (SystemClock.uptimeMillis() > stayUntilMs) { stayUntilMs = 0L; return }
+        if (currentTopApp() != ZLINK_PKG || stayBounces >= 3) return
+        val prev = stayPrevApp ?: packageName
+        stayBounces++
+        log("zlink jumped to front -- returning to $prev")
+        val intent = if (prev == packageName) {
+            Intent(this, Class.forName("com.minimal.carlauncher.ui.HomeActivity"))
+        } else {
+            packageManager.getLaunchIntentForPackage(prev)
+                ?: Intent(this, Class.forName("com.minimal.carlauncher.ui.HomeActivity"))
+        }
+        try {
+            startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
+        } catch (e: Exception) {
+            log("stay-on-screen failed: $e")
+        }
+    }
+
     // --------------------------------------------------------------------- weather
 
     private fun applyWeather() {
@@ -1510,6 +1574,9 @@ class PanelService : Service() {
         const val MCU_VOLUME_KEY = "mcu_system_volume"
         const val BACKCAR_KEY = "mcu_backcar_state"
         private const val TRIP_GAP_MS = 3 * 60_000L
+        const val ZLINK_ACTION = "com.zjinnova.zlink"
+        const val ZLINK_PKG = "com.zjinnova.zlink"
+        private const val STAY_WINDOW_MS = 10_000L
         private const val WEATHER_REFRESH_MS = 20 * 60_000L
         private const val WEATHER_RETRY_MS = 2 * 60_000L
         private const val WEATHER_STALE_MS = 3 * 60 * 60_000L
