@@ -126,6 +126,7 @@
         <service
             android:name=".panel.PanelService"
             android:exported="false"
+            android:foregroundServiceType="location"
             android:stopWithTask="false" />
 
         <receiver

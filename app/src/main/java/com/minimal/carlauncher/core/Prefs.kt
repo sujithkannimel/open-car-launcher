@@ -49,6 +49,8 @@ object Prefs {
     const val KEY_PANEL_TRANSPARENT = "pref_panel_transparent"
     const val KEY_LAST_VOLTAGE = "pref_last_voltage"
     const val KEY_TRIP_START = "pref_trip_start"
+    const val KEY_GPS_ODO = "pref_gps_odo_km"
+    const val KEY_FUEL = "pref_fuel_state"
     const val KEY_TRIP_LAST_SEEN = "pref_trip_last_seen"
     const val KEY_KNOB_LX = "pref_knob_left_x"
     const val KEY_KNOB_LY = "pref_knob_left_y"
@@ -252,6 +254,31 @@ object Prefs {
     var tripLastSeen: Long
         get() = sp.getLong(KEY_TRIP_LAST_SEEN, 0L)
         set(value) = sp.edit().putLong(KEY_TRIP_LAST_SEEN, value).apply()
+
+    /** Cumulative GPS distance in km (PanelService adds to it while driving). */
+    var gpsOdoKm: Double
+        get() = java.lang.Double.longBitsToDouble(sp.getLong(KEY_GPS_ODO, 0L))
+        set(value) = sp.edit().putLong(KEY_GPS_ODO, java.lang.Double.doubleToRawLongBits(value)).apply()
+
+    /** Fuel estimator state, stored as one "|"-separated line. */
+    var fuelState: FuelState
+        get() {
+            val p = sp.getString(KEY_FUEL, null)?.split("|") ?: return FuelState()
+            return try {
+                FuelState(
+                    tankL = p[0].toFloat(), kmpl = p[1].toFloat(), anchorLitres = p[2].toFloat(),
+                    anchorGpsKm = p[3].toDouble(), lastFullOdo = p[4].toInt(),
+                    lastFullGpsKm = p[5].toDouble(), partialLitresSinceFull = p[6].toFloat(),
+                )
+            } catch (_: Exception) { FuelState() }
+        }
+        set(v) = sp.edit().putString(
+            KEY_FUEL,
+            listOf(v.tankL, v.kmpl, v.anchorLitres, v.anchorGpsKm, v.lastFullOdo,
+                v.lastFullGpsKm, v.partialLitresSinceFull).joinToString("|")
+        ).apply()
+
+    fun resetFuel() { sp.edit().remove(KEY_FUEL).apply() }
 
     // ------------------------------------------------ knob geometry (panel px)
     var knobLeftX: Int

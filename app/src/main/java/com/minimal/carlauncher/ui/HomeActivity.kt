@@ -103,6 +103,10 @@ class HomeActivity : AppCompatActivity() {
         if (intent.getBooleanExtra("open_drawer", false)) {
             binding.root.post { drawer.open() }
         }
+        // Bottom panel's fuel chip.
+        if (intent.getBooleanExtra(FuelDialog.EXTRA_FUEL, false)) {
+            binding.root.post { FuelDialog.show(this) }
+        }
     }
 
     // ------------------------------------------------------------------ wiring
@@ -418,6 +422,7 @@ class HomeActivity : AppCompatActivity() {
         super.onNewIntent(intent)
         if (intent.hasCategory(Intent.CATEGORY_HOME)) resetToDashboard()
         if (intent.getBooleanExtra("open_drawer", false)) drawer.open()
+        if (intent.getBooleanExtra(FuelDialog.EXTRA_FUEL, false)) FuelDialog.show(this)
     }
 
     private fun resetToDashboard() {

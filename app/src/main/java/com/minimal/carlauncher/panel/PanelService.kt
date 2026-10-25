@@ -99,6 +99,23 @@ class PanelService : Service() {
     private var voltSeq = 0          // bumps on every fresh reading
     private var lastHeartbeatMs = 0L
 
+    // Fuel chip + GPS odometer
+    private var fuelBadgeView: View? = null
+    private var fuelText: TextView? = null
+    private var fuelIcon: android.widget.ImageView? = null
+    private var fuelLabel: TextView? = null
+    private var shownFuelKey = ""
+    private var locMgr: android.location.LocationManager? = null
+    private var lastFix: android.location.Location? = null
+    private var pendingKm = 0.0
+    private val gpsListener = object : android.location.LocationListener {
+        override fun onLocationChanged(l: android.location.Location) = onGpsFix(l)
+        @Deprecated("framework")
+        override fun onStatusChanged(p: String?, s: Int, e: android.os.Bundle?) = Unit
+        override fun onProviderEnabled(p: String) = Unit
+        override fun onProviderDisabled(p: String) = Unit
+    }
+
     private val handler = Handler(Looper.getMainLooper())
 
     private val watchdog = object : Runnable {
@@ -107,6 +124,7 @@ class PanelService : Service() {
             checkViews()
             updateVolumeDisplay()
             updateBatteryDisplay()
+            updateFuelDisplay()
             tripHeartbeat()
             handler.postDelayed(this, WATCHDOG_INTERVAL_MS)
         }
@@ -155,6 +173,7 @@ class PanelService : Service() {
         registerVolumeObserver()
         lastHeartbeatMs = 0L
         tripHeartbeat()
+        startGpsOdometer()
         reversing = try { Settings.System.getInt(contentResolver, BACKCAR_KEY, 0) != 0 } catch (_: Exception) { false }
 
         // Wake action: always force-rebuild (called after ACC on via the launcher).
@@ -197,6 +216,8 @@ class PanelService : Service() {
         unregisterBatteryReceiver()
         unregisterVolumeReceiver()
         unregisterVolumeObserver()
+        try { locMgr?.removeUpdates(gpsListener) } catch (_: Exception) {}
+        if (pendingKm > 0) { Prefs.gpsOdoKm = Prefs.gpsOdoKm + pendingKm; pendingKm = 0.0 }
         clear()
         log("service destroyed")
         super.onDestroy()
@@ -350,6 +371,53 @@ class PanelService : Service() {
             leftMargin = sideLeft
         }
         if (!adjusting) root.addView(leftCluster, leftClusterParams)
+
+        // 3b. RIGHT: fuel range chip (software estimate; tap to set up / log a fill-up)
+        val sideRight = Prefs.knobRightX + Prefs.knobArcRadius + 46
+        val rightCluster = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.END or Gravity.CENTER_VERTICAL
+            setPadding(px(10f), px(10f), px(6f), px(10f))
+            clipChildren = false
+            clipToPadding = false
+        }
+        val fuelBadge = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = GradientDrawable().apply { cornerRadius = px(14f).toFloat() }
+            elevation = px(8f).toFloat()
+            setPadding(px(12f), px(6f), px(14f), px(6f))
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                it.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                openFuelDialog()
+            }
+        }
+        val fIcon = android.widget.ImageView(this).apply { setImageResource(R.drawable.ic_panel_fuel) }
+        fuelBadge.addView(fIcon, LinearLayout.LayoutParams(px(20f), px(20f)).apply { rightMargin = px(8f) })
+        val fText = TextView(this).apply {
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 17f)
+            typeface = Typeface.DEFAULT_BOLD
+            includeFontPadding = false
+        }
+        fuelBadge.addView(fText)
+        val fLabel = TextView(this).apply {
+            setTextColor(Color.rgb(130, 150, 170))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
+            typeface = Typeface.DEFAULT_BOLD
+            letterSpacing = 0.14f
+            includeFontPadding = false
+            setPadding(0, px(6f), px(6f), 0)
+        }
+        rightCluster.addView(fuelBadge)
+        rightCluster.addView(fLabel)
+        fuelBadgeView = fuelBadge; fuelText = fText; fuelIcon = fIcon; fuelLabel = fLabel
+        shownFuelKey = ""
+        updateFuelDisplayNow()
+        if (!adjusting) root.addView(rightCluster, FrameLayout.LayoutParams(W, W, Gravity.END or Gravity.CENTER_VERTICAL).apply {
+            rightMargin = sideRight
+        })
 
         // 4. CENTER: Quick-Launcher Buttons (gradient squircle)
         val centerBar = LinearLayout(this).apply {
@@ -989,6 +1057,89 @@ class PanelService : Service() {
         }
     }
 
+    // --------------------------------------------------------------------- fuel
+
+    private fun openFuelDialog() {
+        try {
+            startActivity(
+                Intent(this, Class.forName("com.minimal.carlauncher.ui.HomeActivity"))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                    .putExtra("open_fuel", true)
+            )
+        } catch (e: Exception) {
+            log("openFuelDialog failed: $e")
+        }
+    }
+
+    private fun updateFuelDisplay() { handler.post { updateFuelDisplayNow() } }
+
+    private fun updateFuelDisplayNow() {
+        val s = Prefs.fuelState
+        val gps = Prefs.gpsOdoKm + pendingKm
+        val range = com.minimal.carlauncher.core.FuelEstimator.rangeKm(s, gps)
+        val level = com.minimal.carlauncher.core.FuelEstimator.level(s, gps)
+        val key = "$range/$level"
+        if (key == shownFuelKey) return
+        shownFuelKey = key
+        val color = BATT_COLORS[level]
+        (fuelBadgeView?.background as? GradientDrawable)?.apply {
+            setColor(Color.argb(40, Color.red(color), Color.green(color), Color.blue(color)))
+            setStroke(px(2f), color)
+        }
+        fuelBadgeView?.outlineAmbientShadowColor = color
+        fuelBadgeView?.outlineSpotShadowColor = color
+        fuelIcon?.imageTintList = android.content.res.ColorStateList.valueOf(color)
+        fuelText?.apply {
+            text = if (range < 0) "Set up" else "\u2248 $range km"
+            setTextColor(color)
+            setShadowLayer(12f, 0f, 0f, color)
+        }
+        fuelLabel?.apply {
+            text = when (level) { 0 -> "FUEL"; 3 -> "FUEL LOW"; 4 -> "FUEL RESERVE"; else -> "FUEL RANGE" }
+            setTextColor(if (level >= 3) color else Color.rgb(130, 150, 170))
+        }
+    }
+
+    /**
+     * GPS odometer for the fuel estimate. Runs inside this foreground service (declared
+     * foregroundServiceType="location"), so it keeps counting while Maps / ZLink are in front.
+     */
+    private fun startGpsOdometer() {
+        if (locMgr != null) return
+        if (checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            log("gps odometer: no location permission")
+            return
+        }
+        try {
+            val m = getSystemService(android.location.LocationManager::class.java) ?: return
+            m.requestLocationUpdates(
+                android.location.LocationManager.GPS_PROVIDER, 2000L, 10f, gpsListener, Looper.getMainLooper()
+            )
+            locMgr = m
+        } catch (e: Exception) {
+            log("gps odometer failed: $e")
+        }
+    }
+
+    /** Adds distance between good fixes; drops noisy, stale, parked and impossible jumps. */
+    private fun onGpsFix(l: android.location.Location) {
+        if (!l.hasAccuracy() || l.accuracy > 30f) return
+        val p = lastFix
+        lastFix = l
+        if (p == null) return
+        val dt = (l.time - p.time) / 1000.0
+        if (dt <= 0.0 || dt > 60.0) return
+        val d = p.distanceTo(l).toDouble()
+        if (d / dt > 70.0) return                                  // > 250 km/h: a GPS jump
+        if (d < 5.0 || (l.hasSpeed() && l.speed < 1f && d < 30.0)) return   // parked jitter
+        pendingKm += d / 1000.0
+        if (pendingKm >= 0.2) {
+            Prefs.gpsOdoKm = Prefs.gpsOdoKm + pendingKm
+            pendingKm = 0.0
+        }
+    }
+
     // --------------------------------------------------------------------- trip timer
 
     /**
@@ -1227,6 +1378,7 @@ class PanelService : Service() {
         batteryBadgeView = null
         battLabelView = null
         tripView = null
+        fuelBadgeView = null; fuelText = null; fuelIcon = null; fuelLabel = null
         adjustReadout = null
     }
 
