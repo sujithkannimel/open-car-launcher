@@ -56,10 +56,12 @@ object Prefs {
 
     // Defaults for the K2401 knobs, in panel pixels (1 dp == 1 px at 160 dpi).
     // Fine-tune on the unit: long-press the battery pill -> adjust mode.
-    const val DEF_KNOB_X = 50      // knob centre, distance from its screen edge
-    const val DEF_KNOB_Y = 118     // knob centre, from the top of the 170 px strip
-    const val DEF_KNOB_DISC = 130  // white disc diameter (excess hides under the bezel)
-    const val DEF_KNOB_ARC = 128   // arc radius from the knob centre
+    // Measured from a straight-on photo of the K2401: the knob centres sit almost on the
+    // screen's bottom corners, and the chrome ring's outer edge is ~165 px from the centre.
+    const val DEF_KNOB_X = 20      // knob centre, distance from its screen edge
+    const val DEF_KNOB_Y = 150     // knob centre, from the top of the 170 px strip
+    const val DEF_KNOB_DISC = 220  // white disc diameter: fills the whole lens; excess hides under chrome
+    const val DEF_KNOB_ARC = 184   // arc radius: just outside the chrome ring
 
     const val COMPASS_AUTO = "auto"
     const val COMPASS_GPS = "gps"

@@ -145,11 +145,16 @@ class KnobsView(
         c: Canvas, cx: Float, cy: Float, leftSide: Boolean,
         text: String, topLabel: String, bottomLabel: String
     ) {
-        // Disc + centre text
+        // Disc
         c.drawCircle(cx, cy, discR, discPaint)
-        discText.textSize = discR * 0.62f
-        val ty = cy - (discText.descent() + discText.ascent()) / 2f
-        c.drawText(text, cx, ty, discText)
+
+        // Centre text goes where the screen actually shows through the lens: the knob
+        // centres sit near the screen's bottom corners, so the true centre is partly
+        // off-screen and text drawn there would be cut in half.
+        val (tx, tyc, room) = visibleCentre(cx, cy, min(discR, arcR * 0.6f))
+        discText.textSize = (room * 0.9f).coerceIn(20f, 56f)
+        val ty = tyc - (discText.descent() + discText.ascent()) / 2f
+        c.drawText(text, tx, ty, discText)
 
         // Arc: right side of the left knob, left side of the right knob (mirror).
         val (a0, a1) = span(cy)
@@ -179,6 +184,29 @@ class KnobsView(
             c.drawLine(cx - discR - 10, cy, cx + discR + 10, cy, guidePaint)
             c.drawLine(cx, cy - discR - 10, cx, cy + discR + 10, guidePaint)
         }
+    }
+
+    /**
+     * Centroid of the part of circle (cx, cy, r) that lies on screen, plus the radius of
+     * the largest circle around it that stays both on screen and inside the lens.
+     */
+    private fun visibleCentre(cx: Float, cy: Float, r: Float): Triple<Float, Float, Float> {
+        val w = width.toFloat(); val h = height.toFloat()
+        var sx = 0f; var sy = 0f; var n = 0
+        val step = 4f
+        var y = maxOf(0f, cy - r)
+        while (y <= minOf(h, cy + r)) {
+            var x = maxOf(0f, cx - r)
+            while (x <= minOf(w, cx + r)) {
+                if (hypot(x - cx, y - cy) <= r) { sx += x; sy += y; n++ }
+                x += step
+            }
+            y += step
+        }
+        if (n == 0) return Triple(cx, cy, r)
+        val gx = sx / n; val gy = sy / n
+        val room = minOf(minOf(gx, w - gx), minOf(gy, h - gy), r - hypot(gx - cx, gy - cy))
+        return Triple(gx, gy, room.coerceAtLeast(10f))
     }
 
     private fun mirror(deg: Float, leftSide: Boolean) = if (leftSide) deg else 180f - deg

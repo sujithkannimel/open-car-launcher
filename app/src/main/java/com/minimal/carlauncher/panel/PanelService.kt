@@ -33,6 +33,7 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import com.minimal.carlauncher.R
 import com.minimal.carlauncher.core.Prefs
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -318,49 +319,16 @@ class PanelService : Service() {
             gravity = Gravity.CENTER
         }
 
-        val btnSize = px(62f)
-        val btnRadius = px(18f).toFloat()
+        val btnHome = dockButton(R.drawable.ic_panel_home, 0xFFFF7A45.toInt(), "Home") { openHomeDashboard() }
+        val btnApps = dockButton(R.drawable.ic_panel_apps, 0xFF4D9FFF.toInt(), "Apps") { openAppGrid() }
+        val btnNav = dockButton(R.drawable.ic_panel_nav, 0xFF2ED3C6.toInt(), "Maps") { openMaps() }
+        val btnPhone = dockButton(R.drawable.ic_panel_phone, 0xFF3DDC84.toInt(), "Phone") { openDialer() }
 
-        // Home button (U+2302)
-        val btnHome = modernButton(
-            symbol = "\u2302",
-            startColor = 0xFFFF5722.toInt(),
-            endColor = 0xFFFF8A65.toInt(),
-            size = btnSize,
-            radius = btnRadius
-        ) { openHomeDashboard() }
-
-        // All Apps button
-        val btnApps = modernButton(
-            symbol = "\u25A6",
-            startColor = 0xFF1565C0.toInt(),
-            endColor = 0xFF1E88E5.toInt(),
-            size = btnSize,
-            radius = btnRadius
-        ) { openAppGrid() }
-
-        // Navigation button
-        val btnNav = modernButton(
-            symbol = "\u25B2",
-            startColor = 0xFF00838F.toInt(),
-            endColor = 0xFF00ACC1.toInt(),
-            size = btnSize,
-            radius = btnRadius
-        ) { openMaps() }
-
-        // Phone button (U+260E)
-        val btnPhone = modernButton(
-            symbol = "\u260E",
-            startColor = 0xFF2E7D32.toInt(),
-            endColor = 0xFF43A047.toInt(),
-            size = btnSize,
-            radius = btnRadius
-        ) { openDialer() }
-
-        centerBar.addView(btnHome, margin(btnSize, px(8f)))
-        centerBar.addView(btnApps, margin(btnSize, px(8f)))
-        centerBar.addView(btnNav, margin(btnSize, px(8f)))
-        centerBar.addView(btnPhone, margin(btnSize, px(8f)))
+        for (b in listOf(btnHome, btnApps, btnNav, btnPhone)) {
+            centerBar.addView(b, LinearLayout.LayoutParams(W, W).apply {
+                leftMargin = px(10f); rightMargin = px(10f)
+            })
+        }
 
         if (adjusting) {
             root.addView(buildAdjustBar(), FrameLayout.LayoutParams(W, h, Gravity.CENTER))
@@ -415,7 +383,7 @@ class PanelService : Service() {
         row.addView(adjustButton("\u25BC") { nudge(dy = 2) })
         row.addView(adjustButton("\u25B6") { nudge(dx = 2) })
         row.addView(adjustButton("\u25CB\u2212") { Prefs.knobDisc = (Prefs.knobDisc - 2).coerceAtLeast(40); knobChanged() })
-        row.addView(adjustButton("\u25CB+") { Prefs.knobDisc = (Prefs.knobDisc + 2).coerceAtMost(220); knobChanged() })
+        row.addView(adjustButton("\u25CB+") { Prefs.knobDisc = (Prefs.knobDisc + 2).coerceAtMost(320); knobChanged() })
         row.addView(adjustButton("\u25E0\u2212") { Prefs.knobArcRadius = (Prefs.knobArcRadius - 2).coerceAtLeast(40); knobChanged() })
         row.addView(adjustButton("\u25E0+") { Prefs.knobArcRadius = (Prefs.knobArcRadius + 2).coerceAtMost(260); knobChanged() })
         row.addView(adjustButton("RESET", wide = true, repeat = false) { Prefs.resetKnobGeometry(); knobChanged() })
@@ -503,43 +471,65 @@ class PanelService : Service() {
 
     // --------------------------------------------------------------------- modern button helper
 
-    private fun margin(size: Int, horizontalMargin: Int): LinearLayout.LayoutParams =
-        LinearLayout.LayoutParams(size, size).apply {
-            leftMargin = horizontalMargin
-            rightMargin = horizontalMargin
-        }
+    /**
+     * Modern dock button: dark glass tile with a hairline accent border, a crisp vector
+     * icon in the accent colour, and a small label underneath. Press = accent wash.
+     */
+    private fun dockButton(iconRes: Int, accent: Int, label: String, onClick: () -> Unit): View {
+        val tileSize = px(64f)
+        val radius = px(20f).toFloat()
+        fun withAlpha(c: Int, a: Int) = Color.argb(a, Color.red(c), Color.green(c), Color.blue(c))
 
-    private fun modernButton(
-        symbol: String,
-        startColor: Int,
-        endColor: Int,
-        size: Int,
-        radius: Float,
-        onClick: () -> Unit
-    ): FrameLayout {
-        return FrameLayout(this).apply {
-            background = GradientDrawable(
-                GradientDrawable.Orientation.TL_BR,
-                intArrayOf(startColor, endColor)
-            ).apply {
-                cornerRadius = radius
-                setStroke(px(1f), Color.argb(60, 255, 255, 255))
+        val idle = GradientDrawable().apply {
+            cornerRadius = radius
+            setColor(Color.rgb(24, 31, 42))
+            setStroke(px(1.5f), withAlpha(accent, 110))
+        }
+        val pressed = GradientDrawable().apply {
+            cornerRadius = radius
+            setColor(withAlpha(accent, 70))
+            setStroke(px(1.5f), accent)
+        }
+        val tile = FrameLayout(this).apply {
+            background = android.graphics.drawable.StateListDrawable().apply {
+                addState(intArrayOf(android.R.attr.state_pressed), pressed)
+                addState(intArrayOf(), idle)
             }
-            elevation = px(5f).toFloat()
             isClickable = true
             isFocusable = true
-            val tv = TextView(context).apply {
-                text = symbol
-                setTextColor(Color.WHITE)
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 26f)
-                gravity = Gravity.CENTER
-                includeFontPadding = false
-            }
-            addView(tv, FrameLayout.LayoutParams(M, M, Gravity.CENTER))
+            elevation = px(4f).toFloat()
             setOnClickListener {
                 it.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
                 onClick()
             }
+        }
+        // Soft accent glow dot behind the icon for depth (flat, no blur).
+        val halo = View(this).apply {
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(withAlpha(accent, 38))
+            }
+        }
+        tile.addView(halo, FrameLayout.LayoutParams(px(44f), px(44f), Gravity.CENTER))
+        val icon = android.widget.ImageView(this).apply {
+            setImageResource(iconRes)
+            imageTintList = android.content.res.ColorStateList.valueOf(accent)
+        }
+        tile.addView(icon, FrameLayout.LayoutParams(px(30f), px(30f), Gravity.CENTER))
+
+        val caption = TextView(this).apply {
+            text = label
+            setTextColor(Color.rgb(150, 165, 182))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+            gravity = Gravity.CENTER
+            letterSpacing = 0.04f
+            includeFontPadding = false
+        }
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            addView(tile, LinearLayout.LayoutParams(tileSize, tileSize))
+            addView(caption, LinearLayout.LayoutParams(W, W).apply { topMargin = px(6f) })
         }
     }
 
