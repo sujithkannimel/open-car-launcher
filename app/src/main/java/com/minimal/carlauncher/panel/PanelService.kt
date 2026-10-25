@@ -105,6 +105,12 @@ class PanelService : Service() {
     private var fuelIcon: android.widget.ImageView? = null
     private var fuelLabel: TextView? = null
     private var shownFuelKey = ""
+
+    // Weather (plain icon + temperature on the status line)
+    private var weatherIcon: WeatherIconView? = null
+    private var weatherTemp: TextView? = null
+    private var weather: Weather? = null
+    @Volatile private var weatherFetching = false
     private var locMgr: android.location.LocationManager? = null
     private var lastFix: android.location.Location? = null
     private var pendingKm = 0.0
@@ -126,6 +132,7 @@ class PanelService : Service() {
             updateBatteryDisplay()
             updateFuelDisplay()
             tripHeartbeat()
+            maybeRefreshWeather()
             handler.postDelayed(this, WATCHDOG_INTERVAL_MS)
         }
     }
@@ -174,6 +181,10 @@ class PanelService : Service() {
         lastHeartbeatMs = 0L
         tripHeartbeat()
         startGpsOdometer()
+        if (weather == null) {
+            weather = Prefs.weatherJson.takeIf { it.isNotEmpty() && System.currentTimeMillis() - Prefs.weatherAt < WEATHER_STALE_MS }
+                ?.let { WeatherApi.parse(it) }
+        }
         reversing = try { Settings.System.getInt(contentResolver, BACKCAR_KEY, 0) != 0 } catch (_: Exception) { false }
 
         // Wake action: always force-rebuild (called after ACC on via the launcher).
@@ -358,12 +369,33 @@ class PanelService : Service() {
             setPadding(px(6f), px(6f), 0, 0)
             addView(battSubtitle)
             addView(trip, LinearLayout.LayoutParams(W, W).apply { leftMargin = px(12f) })
+            // Weather: phone-style icon + temperature, plain (no pill). Tap = quick summary.
+            val wIcon = WeatherIconView(this@PanelService)
+            val wTemp = TextView(this@PanelService).apply {
+                setTextColor(Color.rgb(200, 212, 224))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+                typeface = Typeface.DEFAULT_BOLD
+                includeFontPadding = false
+            }
+            val wBox = LinearLayout(this@PanelService).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(px(4f), px(2f), px(4f), px(2f))
+                isClickable = true
+                setOnClickListener { showWeatherSummary() }
+                addView(wIcon, LinearLayout.LayoutParams(px(18f), px(18f)).apply { rightMargin = px(4f) })
+                addView(wTemp)
+            }
+            addView(wBox, LinearLayout.LayoutParams(W, W).apply { leftMargin = px(10f) })
+            weatherIcon = wIcon
+            weatherTemp = wTemp
         }
         leftCluster.addView(batteryBadge)
         leftCluster.addView(subRow)
         batteryBadgeView = batteryBadge
         battLabelView = battSubtitle
         tripView = trip
+        applyWeather()
         shownBattState = -1          // force re-style on the new views
         applyBatteryState(classify(currentVolts()))
 
@@ -1140,6 +1172,84 @@ class PanelService : Service() {
         }
     }
 
+    // --------------------------------------------------------------------- weather
+
+    private fun applyWeather() {
+        val w = weather
+        val icon = weatherIcon ?: return
+        val txt = weatherTemp ?: return
+        if (w == null) {
+            icon.visibility = View.GONE
+            txt.text = ""
+            return
+        }
+        icon.visibility = View.VISIBLE
+        icon.kind = WeatherApi.kind(w.code)
+        icon.isDay = w.isDay
+        txt.text = "${w.temp}\u00B0"
+    }
+
+    private fun showWeatherSummary() {
+        val w = weather
+        val msg = if (w == null) {
+            "Weather not available yet (needs internet and a location)"
+        } else {
+            val today = w.days.firstOrNull()
+            buildString {
+                append("${w.temp}\u00B0  ${WeatherApi.describe(w.code)}\n")
+                append("Feels ${w.feels}\u00B0 \u00B7 Humidity ${w.humidity}% \u00B7 Wind ${w.windKmh} km/h")
+                if (today != null) append("\nToday ${today.min}\u00B0 / ${today.max}\u00B0 \u00B7 Rain ${today.rainPct}%")
+                w.hours.take(3).let { h ->
+                    if (h.isNotEmpty()) append("\n" + h.joinToString("   ") { "${it.label} ${it.temp}\u00B0" })
+                }
+                append("\nUpdated ${w.updated}")
+            }
+        }
+        Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+    }
+
+    /** Refreshes at most every 20 min, off the main thread, using a ~1 km rounded location. */
+    private fun maybeRefreshWeather() {
+        if (weatherFetching) return
+        val now = System.currentTimeMillis()
+        if (now - Prefs.weatherAt < WEATHER_REFRESH_MS && weather != null) return
+        if (now - lastWeatherTry < WEATHER_RETRY_MS) return
+        val loc = weatherLocation() ?: return
+        lastWeatherTry = now
+        weatherFetching = true
+        Thread {
+            val json = WeatherApi.fetch(loc.first, loc.second)
+            val parsed = json?.let { WeatherApi.parse(it) }
+            handler.post {
+                weatherFetching = false
+                if (json != null && parsed != null) {
+                    Prefs.weatherJson = json
+                    Prefs.weatherAt = System.currentTimeMillis()
+                    weather = parsed
+                    applyWeather()
+                }
+            }
+        }.start()
+    }
+
+    private var lastWeatherTry = 0L
+
+    /** Live GPS fix, else last known fix, else the map's last position. */
+    private fun weatherLocation(): Pair<Double, Double>? {
+        lastFix?.let { return it.latitude to it.longitude }
+        try {
+            if (checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                val m = getSystemService(android.location.LocationManager::class.java)
+                for (p in listOf("gps", "network", "passive")) {
+                    val l = m?.getLastKnownLocation(p) ?: continue
+                    return l.latitude to l.longitude
+                }
+            }
+        } catch (_: Exception) {}
+        return Prefs.mapCamera()?.let { it.first to it.second }
+    }
+
     // --------------------------------------------------------------------- trip timer
 
     /**
@@ -1379,6 +1489,7 @@ class PanelService : Service() {
         battLabelView = null
         tripView = null
         fuelBadgeView = null; fuelText = null; fuelIcon = null; fuelLabel = null
+        weatherIcon = null; weatherTemp = null
         adjustReadout = null
     }
 
@@ -1399,6 +1510,9 @@ class PanelService : Service() {
         const val MCU_VOLUME_KEY = "mcu_system_volume"
         const val BACKCAR_KEY = "mcu_backcar_state"
         private const val TRIP_GAP_MS = 3 * 60_000L
+        private const val WEATHER_REFRESH_MS = 20 * 60_000L
+        private const val WEATHER_RETRY_MS = 2 * 60_000L
+        private const val WEATHER_STALE_MS = 3 * 60 * 60_000L
 
         private const val BATT_NONE = 0
         private const val BATT_CHARGING = 1

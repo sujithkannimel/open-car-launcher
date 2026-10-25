@@ -51,6 +51,8 @@ object Prefs {
     const val KEY_TRIP_START = "pref_trip_start"
     const val KEY_GPS_ODO = "pref_gps_odo_km"
     const val KEY_FUEL = "pref_fuel_state"
+    const val KEY_WEATHER_JSON = "pref_weather_json"
+    const val KEY_WEATHER_AT = "pref_weather_at"
     const val KEY_TRIP_LAST_SEEN = "pref_trip_last_seen"
     const val KEY_KNOB_LX = "pref_knob_left_x"
     const val KEY_KNOB_LY = "pref_knob_left_y"
@@ -279,6 +281,15 @@ object Prefs {
         ).apply()
 
     fun resetFuel() { sp.edit().remove(KEY_FUEL).apply() }
+
+    /** Last Open-Meteo reply and when it was fetched, so weather shows at once after a restart. */
+    var weatherJson: String
+        get() = sp.getString(KEY_WEATHER_JSON, "") ?: ""
+        set(value) = sp.edit().putString(KEY_WEATHER_JSON, value).apply()
+
+    var weatherAt: Long
+        get() = sp.getLong(KEY_WEATHER_AT, 0L)
+        set(value) = sp.edit().putLong(KEY_WEATHER_AT, value).apply()
 
     // ------------------------------------------------ knob geometry (panel px)
     var knobLeftX: Int
