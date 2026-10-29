@@ -110,6 +110,16 @@
             </intent-filter>
         </activity>
 
+        <!-- Trips & fuel: opened from the panel's fuel chip and trip timer. -->
+        <activity
+            android:name=".ui.TripsActivity"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:screenOrientation="landscape"
+            android:excludeFromRecents="true"
+            android:theme="@style/Theme.CarLauncher"
+            android:windowSoftInputMode="adjustPan" />
+
         <!-- Radio sync. Granting this listener "notification access" is the only public way
              to read the native tuner's media session; it never reads notifications. -->
         <service

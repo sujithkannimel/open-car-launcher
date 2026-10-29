@@ -51,6 +51,13 @@ object Prefs {
     const val KEY_TRIP_START = "pref_trip_start"
     const val KEY_GPS_ODO = "pref_gps_odo_km"
     const val KEY_FUEL = "pref_fuel_state"
+    const val KEY_FUEL_EVENTS = "pref_fuel_events"
+    const val KEY_TRIP_HISTORY = "pref_trip_history"
+    const val KEY_CUR_TRIP_GPS = "pref_cur_trip_gps"
+    const val KEY_TRIP_LAST_GPS = "pref_trip_last_gps"
+    const val KEY_CUR_TRIP_DRIVE = "pref_cur_trip_drive"
+    const val KEY_CUR_TRIP_IDLE = "pref_cur_trip_idle"
+    const val KEY_CUR_TRIP_MAX = "pref_cur_trip_max"
     const val KEY_WEATHER_JSON = "pref_weather_json"
     const val KEY_STAY_ON_CONNECT = "pref_stay_on_connect"
     const val KEY_USER_OPENED_ZLINK = "pref_user_opened_zlink_at"
@@ -264,25 +271,67 @@ object Prefs {
         get() = java.lang.Double.longBitsToDouble(sp.getLong(KEY_GPS_ODO, 0L))
         set(value) = sp.edit().putLong(KEY_GPS_ODO, java.lang.Double.doubleToRawLongBits(value)).apply()
 
-    /** Fuel estimator state, stored as one "|"-separated line. */
-    var fuelState: FuelState
-        get() {
-            val p = sp.getString(KEY_FUEL, null)?.split("|") ?: return FuelState()
-            return try {
-                FuelState(
-                    tankL = p[0].toFloat(), kmpl = p[1].toFloat(), anchorLitres = p[2].toFloat(),
-                    anchorGpsKm = p[3].toDouble(), lastFullOdo = p[4].toInt(),
-                    lastFullGpsKm = p[5].toDouble(), partialLitresSinceFull = p[6].toFloat(),
-                )
-            } catch (_: Exception) { FuelState() }
-        }
-        set(v) = sp.edit().putString(
-            KEY_FUEL,
-            listOf(v.tankL, v.kmpl, v.anchorLitres, v.anchorGpsKm, v.lastFullOdo,
-                v.lastFullGpsKm, v.partialLitresSinceFull).joinToString("|")
-        ).apply()
+    /** Old single-line fuel state (before the fill-up log); read once for migration. */
+    private fun legacyFuelState(): FuelState? {
+        val p = sp.getString(KEY_FUEL, null)?.split("|") ?: return null
+        return try {
+            FuelState(
+                tankL = p[0].toFloat(), kmpl = p[1].toFloat(), anchorLitres = p[2].toFloat(),
+                anchorGpsKm = p[3].toDouble(), lastFullOdo = p[4].toInt(),
+                lastFullGpsKm = p[5].toDouble(), partialLitresSinceFull = p[6].toFloat(),
+            )
+        } catch (_: Exception) { null }
+    }
 
-    fun resetFuel() { sp.edit().remove(KEY_FUEL).apply() }
+    /** Everything the driver entered about fuel, oldest first. */
+    var fuelEvents: List<FuelEvent>
+        get() {
+            val raw = sp.getString(KEY_FUEL_EVENTS, null)
+            if (raw != null) return FuelEstimator.decode(raw)
+            val migrated = legacyFuelState()?.let { FuelEstimator.migrate(it) } ?: emptyList()
+            if (migrated.isNotEmpty()) {
+                sp.edit().putString(KEY_FUEL_EVENTS, FuelEstimator.encode(migrated)).remove(KEY_FUEL).apply()
+            }
+            return migrated
+        }
+        set(value) = sp.edit().putString(KEY_FUEL_EVENTS, FuelEstimator.encode(value)).apply()
+
+    fun addFuelEvent(e: FuelEvent) { fuelEvents = fuelEvents + e }
+
+    fun fuelReplay(): FuelReplay = FuelEstimator.replay(fuelEvents)
+
+    /** Current fuel state, rebuilt from the fill-up log. */
+    val fuelState: FuelState get() = fuelReplay().state
+
+    fun resetFuel() { sp.edit().remove(KEY_FUEL).remove(KEY_FUEL_EVENTS).apply() }
+
+    // ------------------------------------------------ trips
+
+    var tripHistory: List<TripRecord>
+        get() = TripLog.decode(sp.getString(KEY_TRIP_HISTORY, null))
+        set(value) = sp.edit().putString(KEY_TRIP_HISTORY, TripLog.encode(value)).apply()
+
+    /** GPS odometer when the current trip began. */
+    var curTripGpsStart: Double
+        get() = java.lang.Double.longBitsToDouble(sp.getLong(KEY_CUR_TRIP_GPS, 0L))
+        set(value) = sp.edit().putLong(KEY_CUR_TRIP_GPS, java.lang.Double.doubleToRawLongBits(value)).apply()
+
+    /** GPS odometer at the last heartbeat (the end of the trip if the car is switched off). */
+    var tripLastGps: Double
+        get() = java.lang.Double.longBitsToDouble(sp.getLong(KEY_TRIP_LAST_GPS, 0L))
+        set(value) = sp.edit().putLong(KEY_TRIP_LAST_GPS, java.lang.Double.doubleToRawLongBits(value)).apply()
+
+    var curTripDriveSec: Long
+        get() = sp.getLong(KEY_CUR_TRIP_DRIVE, 0L)
+        set(value) = sp.edit().putLong(KEY_CUR_TRIP_DRIVE, value).apply()
+
+    var curTripIdleSec: Long
+        get() = sp.getLong(KEY_CUR_TRIP_IDLE, 0L)
+        set(value) = sp.edit().putLong(KEY_CUR_TRIP_IDLE, value).apply()
+
+    var curTripMaxKmh: Float
+        get() = sp.getFloat(KEY_CUR_TRIP_MAX, 0f)
+        set(value) = sp.edit().putFloat(KEY_CUR_TRIP_MAX, value).apply()
 
     /** Keep the current screen when ZLink jumps to the front on phone connect. */
     var stayOnConnect: Boolean

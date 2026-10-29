@@ -251,6 +251,7 @@ class PanelService : Service() {
         zlinkReceiver = null
         try { locMgr?.removeUpdates(gpsListener) } catch (_: Exception) {}
         if (pendingKm > 0) { Prefs.gpsOdoKm = Prefs.gpsOdoKm + pendingKm; pendingKm = 0.0 }
+        flushTripStats(force = true)
         clear()
         log("service destroyed")
         super.onDestroy()
@@ -384,6 +385,12 @@ class PanelService : Service() {
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
             typeface = Typeface.MONOSPACE
             includeFontPadding = false
+            setPadding(px(4f), px(4f), px(4f), px(4f))
+            isClickable = true
+            setOnClickListener {
+                it.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                openTrips("trips")
+            }
         }
         val subRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -1114,15 +1121,18 @@ class PanelService : Service() {
 
     // --------------------------------------------------------------------- fuel
 
-    private fun openFuelDialog() {
+    private fun openFuelDialog() = openTrips("fuel")
+
+    /** Opens the Trips & fuel screen on the given tab ("fuel" or "trips"). */
+    private fun openTrips(tab: String) {
         try {
             startActivity(
-                Intent(this, Class.forName("com.minimal.carlauncher.ui.HomeActivity"))
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
-                    .putExtra("open_fuel", true)
+                Intent(this, Class.forName("com.minimal.carlauncher.ui.TripsActivity"))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                    .putExtra("tab", tab)
             )
         } catch (e: Exception) {
-            log("openFuelDialog failed: $e")
+            log("openTrips failed: $e")
         }
     }
 
@@ -1169,7 +1179,7 @@ class PanelService : Service() {
         try {
             val m = getSystemService(android.location.LocationManager::class.java) ?: return
             m.requestLocationUpdates(
-                android.location.LocationManager.GPS_PROVIDER, 2000L, 10f, gpsListener, Looper.getMainLooper()
+                android.location.LocationManager.GPS_PROVIDER, 2000L, 0f, gpsListener, Looper.getMainLooper()
             )
             locMgr = m
         } catch (e: Exception) {
@@ -1187,6 +1197,11 @@ class PanelService : Service() {
         if (dt <= 0.0 || dt > 60.0) return
         val d = p.distanceTo(l).toDouble()
         if (d / dt > 70.0) return                                  // > 250 km/h: a GPS jump
+        // Trip timing: moving vs idling (engine on, standing still).
+        val mps = if (l.hasSpeed()) l.speed.toDouble() else d / dt
+        if (mps >= 1.5) tripDriveAcc += dt else tripIdleAcc += dt
+        if (l.hasSpeed() && l.speed < 70f) tripMaxKmh = maxOf(tripMaxKmh, l.speed * 3.6f)
+        flushTripStats(force = false)
         if (d < 5.0 || (l.hasSpeed() && l.speed < 1f && d < 30.0)) return   // parked jitter
         pendingKm += d / 1000.0
         if (pendingKm >= 0.2) {
@@ -1376,12 +1391,53 @@ class PanelService : Service() {
         lastHeartbeatMs = now
         val last = Prefs.tripLastSeen
         if (Prefs.tripStart <= 0L || last <= 0L || now - last > TRIP_GAP_MS || now < Prefs.tripStart) {
+            finishTrip()
             Prefs.tripStart = now
+            Prefs.curTripGpsStart = Prefs.gpsOdoKm + pendingKm
+            Prefs.curTripDriveSec = 0L
+            Prefs.curTripIdleSec = 0L
+            Prefs.curTripMaxKmh = 0f
+            tripDriveAcc = 0.0; tripIdleAcc = 0.0; tripMaxKmh = 0f
             ignitionElapsed = SystemClock.elapsedRealtime()
             guardBounces = 0
             log("ignition on (new trip) -- ZLink guard active")
         }
+        // Trip started before this version recorded its GPS start: begin counting from now.
+        if (Prefs.curTripGpsStart <= 0.0) Prefs.curTripGpsStart = Prefs.gpsOdoKm + pendingKm
         Prefs.tripLastSeen = now
+        Prefs.tripLastGps = Prefs.gpsOdoKm + pendingKm
+        flushTripStats(force = true)
+    }
+
+    /** Saves the trip that ended at the last heartbeat (car was off since then). */
+    private fun finishTrip() {
+        val start = Prefs.tripStart
+        val end = Prefs.tripLastSeen
+        if (start <= 0L || end <= start) return
+        val startGps = Prefs.curTripGpsStart
+        val km = if (startGps <= 0.0 || Prefs.tripLastGps <= 0.0) 0.0
+            else (Prefs.tripLastGps - startGps).coerceAtLeast(0.0)
+        val rec = com.minimal.carlauncher.core.TripRecord(
+            start, end, km, Prefs.curTripDriveSec, Prefs.curTripIdleSec, Prefs.curTripMaxKmh
+        )
+        Prefs.tripHistory = com.minimal.carlauncher.core.TripLog.append(Prefs.tripHistory, rec)
+        log(String.format(Locale.US, "trip saved: %.1f km", km))
+    }
+
+    private var tripDriveAcc = 0.0
+    private var tripIdleAcc = 0.0
+    private var tripMaxKmh = 0f
+    private var lastTripFlush = 0L
+
+    /** Moves the in-memory drive / idle seconds into Prefs (every ~10 s, or now). */
+    private fun flushTripStats(force: Boolean) {
+        val now = SystemClock.elapsedRealtime()
+        if (!force && now - lastTripFlush < 10_000L) return
+        lastTripFlush = now
+        val drive = tripDriveAcc.toLong(); val idle = tripIdleAcc.toLong()
+        if (drive > 0) { Prefs.curTripDriveSec = Prefs.curTripDriveSec + drive; tripDriveAcc -= drive }
+        if (idle > 0) { Prefs.curTripIdleSec = Prefs.curTripIdleSec + idle; tripIdleAcc -= idle }
+        if (tripMaxKmh > Prefs.curTripMaxKmh) Prefs.curTripMaxKmh = tripMaxKmh
     }
 
     private fun tripText(): String {

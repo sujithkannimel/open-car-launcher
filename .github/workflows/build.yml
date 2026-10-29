@@ -32,10 +32,24 @@ jobs:
           gradle-version: '8.9'
 
       - name: Unit tests
-        run: gradle --no-daemon :app:testDebugUnitTest
+        shell: bash
+        run: set -o pipefail; gradle --no-daemon :app:testDebugUnitTest 2>&1 | tee build.log
 
       - name: Assemble debug APK
-        run: gradle --no-daemon :app:assembleDebug
+        shell: bash
+        run: set -o pipefail; gradle --no-daemon :app:assembleDebug 2>&1 | tee -a build.log
+
+      # Surface compiler / test errors as annotations (readable through the checks API).
+      - name: Report build errors
+        if: failure()
+        shell: bash
+        run: |
+          grep -E "^e: |error:|FAILED|AssertionError|expected:<|What went wrong" -A2 build.log \
+            | grep -v "^--$" | head -60 | while IFS= read -r l; do echo "::error::$l"; done
+          for f in app/build/test-results/testDebugUnitTest/*.xml; do
+            grep -o 'testcase name="[^"]*"[^>]*>\s*<failure message="[^"]*' "$f" 2>/dev/null | head -10 \
+              | while IFS= read -r l; do echo "::error::$l"; done
+          done
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
