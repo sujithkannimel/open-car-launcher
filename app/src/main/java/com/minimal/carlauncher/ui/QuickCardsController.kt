@@ -71,6 +71,8 @@ class QuickCardsController(
     // ------------------------------------------------------------------ projection
 
     private fun launchProjection() {
+        // Tell the panel's stay-on-screen guard this one was on purpose.
+        Prefs.userOpenedZlinkAt = System.currentTimeMillis()
         Prefs.projectionPackage?.let { stored ->
             if (IntentUtil.launchPackage(activity, stored)) return
             Prefs.projectionPackage = null   // it was uninstalled

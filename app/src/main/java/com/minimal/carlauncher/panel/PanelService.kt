@@ -117,6 +117,13 @@ class PanelService : Service() {
     private var stayPrevApp: String? = null
     private var stayUntilMs = 0L
     private var stayBounces = 0
+
+    // Guard for the first minutes after ignition on: ZLink may bring itself forward on a
+    // cold boot without the PHONEFOUND broadcast we normally catch (or before we listen).
+    private var ignitionElapsed = 0L
+    private var guardBounces = 0
+    private var lastNonZlinkTop: String? = null
+    private var lastWakeLogMs = 0L
     private var locMgr: android.location.LocationManager? = null
     private var lastFix: android.location.Location? = null
     private var pendingKm = 0.0
@@ -133,6 +140,7 @@ class PanelService : Service() {
     private val watchdog = object : Runnable {
         override fun run() {
             checkReverse()
+            checkZlinkTakeover()
             checkViews()
             updateVolumeDisplay()
             updateBatteryDisplay()
@@ -196,11 +204,16 @@ class PanelService : Service() {
 
         // Wake action: always force-rebuild (called after ACC on via the launcher).
         if (action == ACTION_WAKE) {
-            log("wake -- force rebuilding panel")
+            val nowMs = SystemClock.elapsedRealtime()
+            if (nowMs - lastWakeLogMs > 3 * 60_000L) {
+                lastWakeLogMs = nowMs
+                log("wake -- force rebuilding panel")
+            }
             hidden = false
             build()
             restartWatchdog()
             startVolumeWatcher()
+            scheduleTakeoverChecks()
             return START_STICKY
         }
 
@@ -851,6 +864,7 @@ class PanelService : Service() {
             override fun onChange(selfChange: Boolean) {
                 super.onChange(selfChange)
                 checkReverse()
+                checkZlinkTakeover()
                 updateVolumeDisplay()
             }
         }
@@ -1213,6 +1227,38 @@ class PanelService : Service() {
         } catch (_: Exception) {}
     }
 
+    private fun userOpenedZlinkRecently() =
+        System.currentTimeMillis() - Prefs.userOpenedZlinkAt < USER_OPEN_GRACE_MS
+
+    /** Re-checks a few times right after the service (re)starts, e.g. after a cold boot. */
+    private fun scheduleTakeoverChecks() {
+        for (d in longArrayOf(1_500, 4_000, 8_000, 15_000)) {
+            handler.postDelayed({ checkZlinkTakeover() }, d)
+        }
+    }
+
+    /**
+     * Within GUARD_MS of ignition on, if ZLink is in front and the driver did not open it
+     * from the Phone Link tile, go back. At most twice per ignition, so the floating button
+     * still wins if the driver really wants Android Auto that early.
+     */
+    private fun checkZlinkTakeover() {
+        val top = currentTopApp() ?: return
+        if (top != ZLINK_PKG) {
+            lastNonZlinkTop = top
+            return
+        }
+        if (!Prefs.stayOnConnect || reversing) return
+        if (ignitionElapsed == 0L) return
+        if (SystemClock.elapsedRealtime() - ignitionElapsed > GUARD_MS) return
+        if (guardBounces >= 2 || userOpenedZlinkRecently()) return
+        if (SystemClock.uptimeMillis() < stayUntilMs) return   // broadcast path is handling it
+        guardBounces++
+        val prev = lastNonZlinkTop?.takeIf { it != ZLINK_PKG } ?: packageName
+        log("zlink in front after ignition -- returning to $prev (guard $guardBounces)")
+        returnTo(prev)
+    }
+
     private fun currentTopApp(): String? = try {
         Settings.System.getString(contentResolver, "key_top_app")
     } catch (_: Exception) { null }
@@ -1220,15 +1266,18 @@ class PanelService : Service() {
     private fun bounceBackIfZlink() {
         if (SystemClock.uptimeMillis() > stayUntilMs) { stayUntilMs = 0L; return }
         if (currentTopApp() != ZLINK_PKG || stayBounces >= 3) return
+        if (userOpenedZlinkRecently()) return
         val prev = stayPrevApp ?: packageName
         stayBounces++
         log("zlink jumped to front -- returning to $prev")
-        val intent = if (prev == packageName) {
-            Intent(this, Class.forName("com.minimal.carlauncher.ui.HomeActivity"))
-        } else {
-            packageManager.getLaunchIntentForPackage(prev)
-                ?: Intent(this, Class.forName("com.minimal.carlauncher.ui.HomeActivity"))
-        }
+        returnTo(prev)
+    }
+
+    /** Brings [prev] (or the launcher) back to the front. */
+    private fun returnTo(prev: String) {
+        val home = Intent(this, Class.forName("com.minimal.carlauncher.ui.HomeActivity"))
+        val intent = if (prev == packageName) home
+        else packageManager.getLaunchIntentForPackage(prev) ?: home
         try {
             startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
         } catch (e: Exception) {
@@ -1328,6 +1377,9 @@ class PanelService : Service() {
         val last = Prefs.tripLastSeen
         if (Prefs.tripStart <= 0L || last <= 0L || now - last > TRIP_GAP_MS || now < Prefs.tripStart) {
             Prefs.tripStart = now
+            ignitionElapsed = SystemClock.elapsedRealtime()
+            guardBounces = 0
+            log("ignition on (new trip) -- ZLink guard active")
         }
         Prefs.tripLastSeen = now
     }
@@ -1577,6 +1629,8 @@ class PanelService : Service() {
         const val ZLINK_ACTION = "com.zjinnova.zlink"
         const val ZLINK_PKG = "com.zjinnova.zlink"
         private const val STAY_WINDOW_MS = 10_000L
+        private const val GUARD_MS = 3 * 60_000L
+        private const val USER_OPEN_GRACE_MS = 20_000L
         private const val WEATHER_REFRESH_MS = 20 * 60_000L
         private const val WEATHER_RETRY_MS = 2 * 60_000L
         private const val WEATHER_STALE_MS = 3 * 60 * 60_000L
@@ -1628,7 +1682,7 @@ class PanelService : Service() {
             val prefs = context.getSharedPreferences("panel_log", Context.MODE_PRIVATE)
             val line = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date()) + " " + msg
             val old = prefs.getString("log", "")?.split("\n") ?: emptyList()
-            val combined = (listOf(line) + old.filter { it.isNotEmpty() }.take(19))
+            val combined = (listOf(line) + old.filter { it.isNotEmpty() }.take(59))
                 .joinToString("\n")
             prefs.edit().putString("log", combined).apply()
         }

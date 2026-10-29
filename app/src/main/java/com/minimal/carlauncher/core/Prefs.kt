@@ -53,6 +53,7 @@ object Prefs {
     const val KEY_FUEL = "pref_fuel_state"
     const val KEY_WEATHER_JSON = "pref_weather_json"
     const val KEY_STAY_ON_CONNECT = "pref_stay_on_connect"
+    const val KEY_USER_OPENED_ZLINK = "pref_user_opened_zlink_at"
     const val KEY_WEATHER_AT = "pref_weather_at"
     const val KEY_TRIP_LAST_SEEN = "pref_trip_last_seen"
     const val KEY_KNOB_LX = "pref_knob_left_x"
@@ -287,6 +288,11 @@ object Prefs {
     var stayOnConnect: Boolean
         get() = sp.getBoolean(KEY_STAY_ON_CONNECT, true)
         set(value) = sp.edit().putBoolean(KEY_STAY_ON_CONNECT, value).apply()
+
+    /** Wall-clock ms when the driver opened the projection app from the Phone Link tile. */
+    var userOpenedZlinkAt: Long
+        get() = sp.getLong(KEY_USER_OPENED_ZLINK, 0L)
+        set(value) = sp.edit().putLong(KEY_USER_OPENED_ZLINK, value).apply()
 
     /** Last Open-Meteo reply and when it was fetched, so weather shows at once after a restart. */
     var weatherJson: String
