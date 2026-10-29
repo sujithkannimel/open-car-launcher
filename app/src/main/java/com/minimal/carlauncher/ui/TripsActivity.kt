@@ -245,6 +245,142 @@ class TripsActivity : AppCompatActivity() {
             "Back up now" to { backupNow() },
             "Restore" to { restore(askPermission = true) },
         )))
+
+        content.addView(section("Cloud backup (private GitHub repo)"))
+        content.addView(body(
+            if (!Prefs.cloudConfigured) "Not set up. Uploads one backup a day to your private repo when there is internet."
+            else "${Prefs.cloudRepo}" + (if (Prefs.cloudPass.isNotEmpty()) " \u00B7 encrypted" else "") +
+                "\n" + Prefs.cloudStatus.ifEmpty { "No upload yet." }
+        ))
+        content.addView(buttonRow(listOf(
+            "Cloud settings" to { cloudSettings(Prefs.cloudRepo.ifEmpty { "sujithkannimel/car-backups" }, "", Prefs.cloudPass) },
+            "Upload now" to { cloudUploadNow() },
+            "Restore from cloud" to { cloudRestore() },
+        )))
+    }
+
+    // ================================================================== cloud
+
+    private fun cloudSettings(repoIn: String, tokenIn: String, passIn: String) {
+        val a = this
+        val col = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL; setPadding(px(24), px(8), px(24), 0) }
+        fun label(t: String) = TextView(a).apply { text = t; setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f); setPadding(0, px(10), 0, px(2)) }
+        fun field(v: String, hint: String, secret: Boolean) = android.widget.EditText(a).apply {
+            setText(v); this.hint = hint; isSingleLine = true
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                (if (secret) android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD else android.text.InputType.TYPE_TEXT_VARIATION_URI)
+        }
+        col.addView(label("Private repo (owner/name)"))
+        val repo = field(repoIn, "sujithkannimel/car-backups", false); col.addView(repo)
+        col.addView(label("Token (github_pat_...)"))
+        val token = field(tokenIn, if (Prefs.cloudToken.isNotEmpty()) "Saved - leave empty to keep it" else "Tap here, then paste with ADB", true)
+        col.addView(token)
+        col.addView(label("Passphrase (optional - encrypts the cloud copy; can't be recovered if forgotten)"))
+        val pass = field(passIn, "Leave empty for none", true); col.addView(pass)
+
+        AlertDialog.Builder(a, DIALOG)
+            .setTitle("Cloud backup")
+            .setView(col)
+            .setPositiveButton("Test & save") { _, _ ->
+                val r = repo.text.toString().trim()
+                val t = token.text.toString().trim().ifEmpty { Prefs.cloudToken }
+                val p = pass.text.toString()
+                if (t.isEmpty()) { Toast.makeText(a, "Paste the token first", Toast.LENGTH_LONG).show(); return@setPositiveButton }
+                Toast.makeText(a, "Testing...", Toast.LENGTH_SHORT).show()
+                Thread {
+                    val res = com.minimal.carlauncher.core.CloudBackup.test(r, t)
+                    runOnUiThread {
+                        if (res.ok) {
+                            Prefs.cloudRepo = r; Prefs.cloudToken = t; Prefs.cloudPass = p
+                            Prefs.cloudLastDay = ""   // upload today's backup at the next chance
+                            Toast.makeText(a, res.message + ". Saved.", Toast.LENGTH_LONG).show()
+                            render()
+                        } else {
+                            AlertDialog.Builder(a, DIALOG).setTitle("Not saved").setMessage(res.message)
+                                .setPositiveButton("Edit") { _, _ -> cloudSettings(r, token.text.toString(), p) }
+                                .setNegativeButton("Cancel", null).show()
+                        }
+                    }
+                }.start()
+            }
+            .setNeutralButton("Remove") { _, _ ->
+                Prefs.cloudToken = ""; Prefs.cloudRepo = ""; Prefs.cloudPass = ""; Prefs.cloudStatus = ""
+                Toast.makeText(a, "Cloud backup removed from this head unit", Toast.LENGTH_LONG).show()
+                render()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+        token.requestFocus()
+    }
+
+    private fun cloudUploadNow() {
+        if (!Prefs.cloudConfigured) { cloudSettings("sujithkannimel/car-backups", "", ""); return }
+        Toast.makeText(this, "Uploading...", Toast.LENGTH_SHORT).show()
+        Thread {
+            val cb = com.minimal.carlauncher.core.CloudBackup
+            val res = cb.upload(Prefs.cloudRepo, Prefs.cloudToken, cb.manualName(), cb.payload())
+            Prefs.cloudStatus = res.message + " (" + SimpleDateFormat("d MMM HH:mm", Locale.US).format(Date()) + ")"
+            runOnUiThread { Toast.makeText(this, res.message, Toast.LENGTH_LONG).show(); render() }
+        }.start()
+    }
+
+    private fun cloudRestore() {
+        if (!Prefs.cloudConfigured) { cloudSettings("sujithkannimel/car-backups", "", ""); return }
+        Toast.makeText(this, "Loading cloud backups...", Toast.LENGTH_SHORT).show()
+        Thread {
+            val names = com.minimal.carlauncher.core.CloudBackup.list(Prefs.cloudRepo, Prefs.cloudToken)
+            runOnUiThread {
+                when {
+                    names == null -> Toast.makeText(this, "Couldn't reach GitHub", Toast.LENGTH_LONG).show()
+                    names.isEmpty() -> Toast.makeText(this, "No cloud backups yet", Toast.LENGTH_LONG).show()
+                    else -> {
+                        val shown = names.take(30)
+                        AlertDialog.Builder(this, DIALOG)
+                            .setTitle("Restore which cloud backup?")
+                            .setItems(shown.map { it.removePrefix("car_launcher_backup_").removeSuffix(".json").replace("_", "  ") }
+                                .toTypedArray()) { _, i -> cloudFetch(shown[i]) }
+                            .setNegativeButton("Cancel", null).show()
+                    }
+                }
+            }
+        }.start()
+    }
+
+    private fun cloudFetch(name: String) {
+        Thread {
+            val text = com.minimal.carlauncher.core.CloudBackup.download(Prefs.cloudRepo, Prefs.cloudToken, name)
+            runOnUiThread {
+                if (text == null) { Toast.makeText(this, "Download failed", Toast.LENGTH_LONG).show(); return@runOnUiThread }
+                openBackupText(name, text, Prefs.cloudPass)
+            }
+        }.start()
+    }
+
+    /** Decrypts if needed (asking for the passphrase when the saved one doesn't fit), then confirms. */
+    private fun openBackupText(name: String, text: String, pass: String) {
+        val crypto = com.minimal.carlauncher.core.BackupCrypto
+        val plain = if (crypto.isEncrypted(text)) {
+            if (pass.isEmpty()) null else crypto.decrypt(text, pass)
+        } else text
+        if (plain == null) {
+            val f = android.widget.EditText(this).apply {
+                inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+                hint = "Passphrase"
+            }
+            AlertDialog.Builder(this, DIALOG)
+                .setTitle(if (pass.isEmpty()) "Encrypted backup" else "Wrong passphrase")
+                .setView(LinearLayout(this).apply { setPadding(px(24), px(8), px(24), 0); addView(f) })
+                .setPositiveButton("Open") { _, _ ->
+                    val p = f.text.toString()
+                    if (p.isEmpty()) return@setPositiveButton
+                    openBackupText(name, text, p)
+                }
+                .setNegativeButton("Cancel", null).show()
+            return
+        }
+        val parsed = com.minimal.carlauncher.core.Backup.parse(plain)
+        if (parsed == null) { Toast.makeText(this, "That file is not a launcher backup", Toast.LENGTH_LONG).show(); return }
+        confirmParsed(parsed, name)
     }
 
     // ================================================================== backup
@@ -292,11 +428,15 @@ class TripsActivity : AppCompatActivity() {
             Toast.makeText(this, "That file is not a launcher backup", Toast.LENGTH_LONG).show()
             return
         }
+        confirmParsed(parsed, e.name)
+    }
+
+    private fun confirmParsed(parsed: com.minimal.carlauncher.core.Backup.Parsed, label: String) {
         val trips = com.minimal.carlauncher.core.TripLog.decode(parsed.values[Prefs.KEY_TRIP_HISTORY] as? String).size
         val fuel = com.minimal.carlauncher.core.FuelEstimator.decode(parsed.values[Prefs.KEY_FUEL_EVENTS] as? String).size
         AlertDialog.Builder(this, DIALOG)
             .setTitle("Restore this backup?")
-            .setMessage("${e.name}\n\n$trips trips and $fuel fuel entries. This replaces the current trip history, fuel log and panel settings. The trip in progress keeps counting.")
+            .setMessage("$label\n\n$trips trips and $fuel fuel entries. This replaces the current trip history, fuel log and panel settings. The trip in progress keeps counting.")
             .setPositiveButton("Restore") { _, _ ->
                 Prefs.restore(parsed)
                 // Rebuild the panel with the restored knob and panel settings.

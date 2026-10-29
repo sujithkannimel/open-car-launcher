@@ -1409,6 +1409,27 @@ class PanelService : Service() {
         Prefs.tripLastGps = Prefs.gpsOdoKm + pendingKm
         flushTripStats(force = true)
         maybeAutoBackup()
+        maybeCloudUpload()
+    }
+
+    @Volatile private var cloudBusy = false
+    private var lastCloudTry = 0L
+
+    /** Once a day to the private GitHub repo; after a failure, retry every 15 min. */
+    private fun maybeCloudUpload() {
+        if (cloudBusy || !Prefs.cloudConfigured) return
+        if (Prefs.cloudLastDay == com.minimal.carlauncher.core.BackupStore.today()) return
+        val now = SystemClock.elapsedRealtime()
+        if (lastCloudTry != 0L && now - lastCloudTry < 15 * 60_000L) return
+        lastCloudTry = now
+        cloudBusy = true
+        Thread {
+            try {
+                if (com.minimal.carlauncher.core.CloudBackup.uploadIfDue()) log("cloud: " + Prefs.cloudStatus)
+            } finally {
+                cloudBusy = false
+            }
+        }.start()
     }
 
     @Volatile private var backingUp = false

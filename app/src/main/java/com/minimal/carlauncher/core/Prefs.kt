@@ -53,6 +53,11 @@ object Prefs {
     const val KEY_FUEL = "pref_fuel_state"
     const val KEY_FUEL_EVENTS = "pref_fuel_events"
     const val KEY_LAST_AUTO_BACKUP = "pref_last_auto_backup_day"
+    const val KEY_CLOUD_REPO = "pref_cloud_repo"
+    const val KEY_CLOUD_TOKEN = "pref_cloud_token"
+    const val KEY_CLOUD_PASS = "pref_cloud_pass"
+    const val KEY_CLOUD_LAST_DAY = "pref_cloud_last_day"
+    const val KEY_CLOUD_STATUS = "pref_cloud_status"
     const val KEY_TRIP_HISTORY = "pref_trip_history"
     const val KEY_CUR_TRIP_GPS = "pref_cur_trip_gps"
     const val KEY_TRIP_LAST_GPS = "pref_trip_last_gps"
@@ -314,6 +319,34 @@ object Prefs {
         set(value) = sp.edit().putString(KEY_LAST_AUTO_BACKUP, value).apply()
 
     fun backupJson(): String = Backup.toJson(sp.all, System.currentTimeMillis())
+
+    // ------------------------------------------------ cloud backup (GitHub, private repo)
+    // Never part of a backup file: see Backup.EXCLUDED.
+
+    /** "owner/name" of the private backup repo, or "". */
+    var cloudRepo: String
+        get() = sp.getString(KEY_CLOUD_REPO, "") ?: ""
+        set(value) = sp.edit().putString(KEY_CLOUD_REPO, value.trim()).apply()
+
+    var cloudToken: String
+        get() = sp.getString(KEY_CLOUD_TOKEN, "") ?: ""
+        set(value) = sp.edit().putString(KEY_CLOUD_TOKEN, value.trim()).apply()
+
+    /** Optional passphrase; empty = upload unencrypted (repo is private). */
+    var cloudPass: String
+        get() = sp.getString(KEY_CLOUD_PASS, "") ?: ""
+        set(value) = sp.edit().putString(KEY_CLOUD_PASS, value).apply()
+
+    var cloudLastDay: String
+        get() = sp.getString(KEY_CLOUD_LAST_DAY, "") ?: ""
+        set(value) = sp.edit().putString(KEY_CLOUD_LAST_DAY, value).apply()
+
+    /** Human-readable result of the last cloud upload. */
+    var cloudStatus: String
+        get() = sp.getString(KEY_CLOUD_STATUS, "") ?: ""
+        set(value) = sp.edit().putString(KEY_CLOUD_STATUS, value).apply()
+
+    val cloudConfigured: Boolean get() = cloudRepo.contains('/') && cloudToken.isNotEmpty()
 
     /**
      * Replaces settings, trip history and fuel log with the backup's values. Values that

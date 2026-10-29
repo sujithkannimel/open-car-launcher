@@ -23,6 +23,9 @@ object Backup {
         Prefs.KEY_TRIP_START, Prefs.KEY_TRIP_LAST_SEEN, Prefs.KEY_TRIP_LAST_GPS,
         Prefs.KEY_CUR_TRIP_GPS, Prefs.KEY_CUR_TRIP_DRIVE, Prefs.KEY_CUR_TRIP_IDLE, Prefs.KEY_CUR_TRIP_MAX,
         Prefs.KEY_USER_OPENED_ZLINK, Prefs.KEY_LAST_AUTO_BACKUP,
+        // Secrets and cloud bookkeeping: never written into a backup file.
+        Prefs.KEY_CLOUD_REPO, Prefs.KEY_CLOUD_TOKEN, Prefs.KEY_CLOUD_PASS,
+        Prefs.KEY_CLOUD_LAST_DAY, Prefs.KEY_CLOUD_STATUS,
     )
 
     fun toJson(values: Map<String, *>, createdMs: Long): String {
