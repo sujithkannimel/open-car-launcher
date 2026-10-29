@@ -1226,7 +1226,7 @@ class PanelService : Service() {
                 if (!Prefs.stayOnConnect) return
                 if (status == "ACTION_ZJ_PHONEFOUND" || (status == "CONNECTED" && stayUntilMs == 0L)) {
                     val top = currentTopApp()
-                    stayPrevApp = top?.takeIf { it != ZLINK_PKG }
+                    stayPrevApp = top?.takeIf { it != ZLINK_PKG && it !in NEVER_RETURN_TO }
                         ?: stayPrevApp ?: packageName
                     stayUntilMs = SystemClock.uptimeMillis() + STAY_WINDOW_MS
                     stayBounces = 0
@@ -1260,7 +1260,7 @@ class PanelService : Service() {
     private fun checkZlinkTakeover() {
         val top = currentTopApp() ?: return
         if (top != ZLINK_PKG) {
-            lastNonZlinkTop = top
+            if (top !in NEVER_RETURN_TO) lastNonZlinkTop = top
             return
         }
         if (!Prefs.stayOnConnect || reversing) return
@@ -1281,7 +1281,7 @@ class PanelService : Service() {
     private fun bounceBackIfZlink() {
         if (SystemClock.uptimeMillis() > stayUntilMs) { stayUntilMs = 0L; return }
         if (currentTopApp() != ZLINK_PKG || stayBounces >= 3) return
-        if (userOpenedZlinkRecently()) return
+        if (userOpenedZlinkRecently() || reversing) return
         val prev = stayPrevApp ?: packageName
         stayBounces++
         log("zlink jumped to front -- returning to $prev")
@@ -1289,7 +1289,8 @@ class PanelService : Service() {
     }
 
     /** Brings [prev] (or the launcher) back to the front. */
-    private fun returnTo(prev: String) {
+    private fun returnTo(target: String) {
+        val prev = if (target in NEVER_RETURN_TO) packageName else target
         val home = Intent(this, Class.forName("com.minimal.carlauncher.ui.HomeActivity"))
         val intent = if (prev == packageName) home
         else packageManager.getLaunchIntentForPackage(prev) ?: home
@@ -1684,6 +1685,9 @@ class PanelService : Service() {
         private const val TRIP_GAP_MS = 3 * 60_000L
         const val ZLINK_ACTION = "com.zjinnova.zlink"
         const val ZLINK_PKG = "com.zjinnova.zlink"
+
+        /** Screens the stay-on-screen logic must never bring back (reverse camera). */
+        private val NEVER_RETURN_TO = setOf("com.nwd.backcar")
         private const val STAY_WINDOW_MS = 10_000L
         private const val GUARD_MS = 3 * 60_000L
         private const val USER_OPEN_GRACE_MS = 20_000L
