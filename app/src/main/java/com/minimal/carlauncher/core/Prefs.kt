@@ -64,6 +64,8 @@ object Prefs {
     const val KEY_CUR_TRIP_DRIVE = "pref_cur_trip_drive"
     const val KEY_CUR_TRIP_IDLE = "pref_cur_trip_idle"
     const val KEY_CUR_TRIP_MAX = "pref_cur_trip_max"
+    const val KEY_CUR_TRIP_HWY = "pref_cur_trip_hwy"
+    const val KEY_BATTERY_LOG = "pref_battery_log"
     const val KEY_WEATHER_JSON = "pref_weather_json"
     const val KEY_STAY_ON_CONNECT = "pref_stay_on_connect"
     const val KEY_USER_OPENED_ZLINK = "pref_user_opened_zlink_at"
@@ -400,6 +402,31 @@ object Prefs {
     var curTripIdleSec: Long
         get() = sp.getLong(KEY_CUR_TRIP_IDLE, 0L)
         set(value) = sp.edit().putLong(KEY_CUR_TRIP_IDLE, value).apply()
+
+    /** km of the trip in progress driven at highway speed. */
+    var curTripHwyKm: Float
+        get() = sp.getFloat(KEY_CUR_TRIP_HWY, 0f)
+        set(value) = sp.edit().putFloat(KEY_CUR_TRIP_HWY, value).apply()
+
+    /** Daily resting / charging voltage summary. */
+    var batteryLog: List<BatteryDay>
+        get() = BatteryHealth.decode(sp.getString(KEY_BATTERY_LOG, null))
+        set(value) = sp.edit().putString(KEY_BATTERY_LOG, BatteryHealth.encode(value)).apply()
+
+    /** Trip in progress as a record (for totals, fuel and the live display), or null. */
+    fun liveTrip(now: Long): TripRecord? {
+        val start = tripStart
+        if (start <= 0L) return null
+        val km = (gpsOdoKm - curTripGpsStart).coerceAtLeast(0.0)
+        return TripRecord(start, now, km, curTripDriveSec, curTripIdleSec, curTripMaxKmh,
+            curTripHwyKm.toDouble().coerceAtMost(km))
+    }
+
+    /** City / highway fuel model over all recorded trips including the live one. */
+    fun fuelModel(now: Long = System.currentTimeMillis()): FuelModelResult {
+        val trips = tripHistory + listOfNotNull(liveTrip(now))
+        return FuelModel.compute(fuelReplay(), trips, gpsOdoKm, now)
+    }
 
     var curTripMaxKmh: Float
         get() = sp.getFloat(KEY_CUR_TRIP_MAX, 0f)

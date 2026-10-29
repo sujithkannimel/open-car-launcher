@@ -1022,6 +1022,7 @@ class PanelService : Service() {
                 canVolts = v
                 voltSeq++
                 Prefs.lastVoltage = v
+                onVoltageReading(v)
                 return
             }
         }
@@ -1086,7 +1087,9 @@ class PanelService : Service() {
         if (voltSeq - pendingSeqStart >= 1) applyBatteryState(s)
     }
 
-    private fun applyBatteryState(s: Int) {
+    private fun applyBatteryState(state: Int) {
+        // Not charging while driving shows amber even when the voltage itself looks normal.
+        val s = if (chargeAlert == 1 && state < BATT_LOW) BATT_LOW else state
         if (s == shownBattState) return
         shownBattState = s
         val color = BATT_COLORS[s]
@@ -1103,8 +1106,12 @@ class PanelService : Service() {
             setShadowLayer(12f, 0f, 0f, color)
         }
         battLabelView?.apply {
-            text = BATT_LABELS[s]
-            setTextColor(if (s >= BATT_LOW) color else Color.rgb(130, 150, 170))
+            text = when {
+                chargeAlert == 1 && s != BATT_CRITICAL -> "NOT CHARGING"
+                chargeAlert == 2 -> "OVERCHARGING"
+                else -> BATT_LABELS[s]
+            }
+            setTextColor(if (s >= BATT_LOW || chargeAlert != 0) color else Color.rgb(130, 150, 170))
         }
         pulseAnim?.cancel()
         pulseAnim = null
@@ -1138,11 +1145,19 @@ class PanelService : Service() {
 
     private fun updateFuelDisplay() { handler.post { updateFuelDisplayNow() } }
 
+    private var fuelModelAt = 0L
+    private var fuelModelRange = -1
+
     private fun updateFuelDisplayNow() {
-        val s = Prefs.fuelState
-        val gps = Prefs.gpsOdoKm + pendingKm
-        val range = com.minimal.carlauncher.core.FuelEstimator.rangeKm(s, gps)
-        val level = com.minimal.carlauncher.core.FuelEstimator.level(s, gps)
+        val now = SystemClock.elapsedRealtime()
+        if (fuelModelAt == 0L || now - fuelModelAt > 20_000L || shownFuelKey.isEmpty()) {
+            fuelModelAt = now
+            fuelModelRange = try { Prefs.fuelModel().rangeKm } catch (_: Exception) {
+                com.minimal.carlauncher.core.FuelEstimator.rangeKm(Prefs.fuelState, Prefs.gpsOdoKm)
+            }
+        }
+        val range = fuelModelRange
+        val level = com.minimal.carlauncher.core.FuelModel.level(range)
         val key = "$range/$level"
         if (key == shownFuelKey) return
         shownFuelKey = key
@@ -1204,6 +1219,7 @@ class PanelService : Service() {
         flushTripStats(force = false)
         if (d < 5.0 || (l.hasSpeed() && l.speed < 1f && d < 30.0)) return   // parked jitter
         pendingKm += d / 1000.0
+        if (mps * 3.6 >= com.minimal.carlauncher.core.FuelModel.HWY_KMH) tripHwyAcc += d / 1000.0
         if (pendingKm >= 0.2) {
             Prefs.gpsOdoKm = Prefs.gpsOdoKm + pendingKm
             pendingKm = 0.0
@@ -1379,6 +1395,53 @@ class PanelService : Service() {
         return Prefs.mapCamera()?.let { it.first to it.second }
     }
 
+    // --------------------------------------------------------------------- battery health
+
+    private var restingWindowOpen = false
+    private var seenChargingThisTrip = false
+    private var lowChargeCount = 0
+    private var highChargeCount = 0
+    /** 0 none, 1 not charging (low while driving), 2 overcharging. */
+    private var chargeAlert = 0
+
+    private fun movingNow(): Boolean {
+        val f = lastFix ?: return false
+        val age = System.currentTimeMillis() - f.time
+        return age < 15_000L && f.hasSpeed() && f.speed >= 15f / 3.6f
+    }
+
+    /** Records resting / charging voltage and keeps the charging alert up to date. */
+    private fun onVoltageReading(v: Float) {
+        val day = com.minimal.carlauncher.core.BackupStore.today()
+        val bh = com.minimal.carlauncher.core.BatteryHealth
+        val sinceIgnition = SystemClock.elapsedRealtime() - ignitionElapsed
+        if (v >= bh.CHARGE_LOW) seenChargingThisTrip = true
+        if (restingWindowOpen && ignitionElapsed > 0L && sinceIgnition < 180_000L &&
+            !seenChargingThisTrip && v < bh.RESTING_MAX && !movingNow()) {
+            Prefs.batteryLog = bh.addResting(Prefs.batteryLog, day, v)
+            log(String.format(Locale.US, "resting voltage %.1fV", v))
+        }
+        if (sinceIgnition >= 180_000L || seenChargingThisTrip) restingWindowOpen = false
+
+        if (movingNow()) {
+            Prefs.batteryLog = bh.addCharging(Prefs.batteryLog, day, v)
+            lowChargeCount = if (v < bh.CHARGE_LOW) lowChargeCount + 1 else 0
+            highChargeCount = if (v > bh.CHARGE_HIGH) highChargeCount + 1 else 0
+            val alert = when { lowChargeCount >= 3 -> 1; highChargeCount >= 2 -> 2; else -> 0 }
+            if (alert != chargeAlert) {
+                chargeAlert = alert
+                if (alert != 0) log(if (alert == 1) "warning: not charging while driving" else "warning: overcharging")
+                shownBattState = -1          // re-style the pill
+                updateBatteryDisplay()
+            }
+        } else if (chargeAlert != 0) {
+            // Only meaningful while driving: clear it when the car stops.
+            chargeAlert = 0; lowChargeCount = 0; highChargeCount = 0
+            shownBattState = -1
+            updateBatteryDisplay()
+        }
+    }
+
     // --------------------------------------------------------------------- trip timer
 
     /**
@@ -1398,7 +1461,10 @@ class PanelService : Service() {
             Prefs.curTripDriveSec = 0L
             Prefs.curTripIdleSec = 0L
             Prefs.curTripMaxKmh = 0f
-            tripDriveAcc = 0.0; tripIdleAcc = 0.0; tripMaxKmh = 0f
+            Prefs.curTripHwyKm = 0f
+            tripDriveAcc = 0.0; tripIdleAcc = 0.0; tripMaxKmh = 0f; tripHwyAcc = 0.0
+            restingWindowOpen = true
+            seenChargingThisTrip = false
             ignitionElapsed = SystemClock.elapsedRealtime()
             guardBounces = 0
             log("ignition on (new trip) -- ZLink guard active")
@@ -1457,7 +1523,8 @@ class PanelService : Service() {
         val km = if (startGps <= 0.0 || Prefs.tripLastGps <= 0.0) 0.0
             else (Prefs.tripLastGps - startGps).coerceAtLeast(0.0)
         val rec = com.minimal.carlauncher.core.TripRecord(
-            start, end, km, Prefs.curTripDriveSec, Prefs.curTripIdleSec, Prefs.curTripMaxKmh
+            start, end, km, Prefs.curTripDriveSec, Prefs.curTripIdleSec, Prefs.curTripMaxKmh,
+            Prefs.curTripHwyKm.toDouble().coerceAtMost(km)
         )
         Prefs.tripHistory = com.minimal.carlauncher.core.TripLog.append(Prefs.tripHistory, rec)
         log(String.format(Locale.US, "trip saved: %.1f km", km))
@@ -1466,6 +1533,7 @@ class PanelService : Service() {
     private var tripDriveAcc = 0.0
     private var tripIdleAcc = 0.0
     private var tripMaxKmh = 0f
+    private var tripHwyAcc = 0.0
     private var lastTripFlush = 0L
 
     /** Moves the in-memory drive / idle seconds into Prefs (every ~10 s, or now). */
@@ -1477,6 +1545,7 @@ class PanelService : Service() {
         if (drive > 0) { Prefs.curTripDriveSec = Prefs.curTripDriveSec + drive; tripDriveAcc -= drive }
         if (idle > 0) { Prefs.curTripIdleSec = Prefs.curTripIdleSec + idle; tripIdleAcc -= idle }
         if (tripMaxKmh > Prefs.curTripMaxKmh) Prefs.curTripMaxKmh = tripMaxKmh
+        if (tripHwyAcc > 0.0) { Prefs.curTripHwyKm = Prefs.curTripHwyKm + tripHwyAcc.toFloat(); tripHwyAcc = 0.0 }
     }
 
     private fun tripText(): String {

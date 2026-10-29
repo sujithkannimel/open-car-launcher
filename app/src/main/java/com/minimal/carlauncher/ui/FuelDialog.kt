@@ -91,10 +91,11 @@ object FuelDialog {
         val r = Prefs.fuelReplay()
         val s = r.state
         val col = column(a)
+        val m = Prefs.fuelModel()
         col.addView(TextView(a).apply {
             text = String.format(
                 Locale.US, "About %d km left  -  %.1f L  -  %.1f km/l",
-                FuelEstimator.rangeKm(s, gps), FuelEstimator.litresLeft(s, gps), s.kmpl
+                m.rangeKm, m.litresLeft, m.kmplNow
             )
             setTextColor(Color.rgb(34, 211, 238))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
@@ -130,8 +131,7 @@ object FuelDialog {
                         litres = l ?: -1f, full = isFull,
                     )
                 )
-                toast(a, String.format(Locale.US, "Saved - about %d km range",
-                    FuelEstimator.rangeKm(Prefs.fuelState, Prefs.gpsOdoKm)))
+                toast(a, String.format(Locale.US, "Saved - about %d km range", Prefs.fuelModel().rangeKm))
                 onDone()
             }
             .setNegativeButton("Cancel", null)
@@ -155,8 +155,7 @@ object FuelDialog {
                 val o = odo.text.toString().toIntOrNull()
                 if (o == null || o <= 0) { toast(a, "Enter the odometer reading"); return@setPositiveButton }
                 Prefs.addFuelEvent(FuelEvent(FuelEvent.KIND_ODO, System.currentTimeMillis(), Prefs.gpsOdoKm, odo = o))
-                toast(a, String.format(Locale.US, "Saved - about %d km range",
-                    FuelEstimator.rangeKm(Prefs.fuelState, Prefs.gpsOdoKm)))
+                toast(a, String.format(Locale.US, "Saved - about %d km range", Prefs.fuelModel().rangeKm))
                 onDone()
             }
             .setNegativeButton("Cancel", null)

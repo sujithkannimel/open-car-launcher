@@ -12,6 +12,8 @@ data class TripRecord(
     val driveSec: Long,       // moving
     val idleSec: Long,        // engine on, standing still
     val maxKmh: Float,
+    /** km driven at highway speed (>= 55 km/h); -1 = not recorded (older trips). */
+    val hwyKm: Double = -1.0,
 ) {
     val durationSec: Long get() = ((end - start) / 1000L).coerceAtLeast(0L)
 
@@ -58,7 +60,7 @@ object TripLog {
         list.forEach { t ->
             put(JSONObject().apply {
                 put("s", t.start); put("e", t.end); put("k", t.km)
-                put("d", t.driveSec); put("i", t.idleSec); put("m", t.maxKmh.toDouble())
+                put("d", t.driveSec); put("i", t.idleSec); put("m", t.maxKmh.toDouble()); put("h", t.hwyKm)
             })
         }
     }.toString()
@@ -71,7 +73,8 @@ object TripLog {
                 val o = arr.optJSONObject(i) ?: return@mapNotNull null
                 TripRecord(
                     o.optLong("s"), o.optLong("e"), o.optDouble("k", 0.0),
-                    o.optLong("d"), o.optLong("i"), o.optDouble("m", 0.0).toFloat()
+                    o.optLong("d"), o.optLong("i"), o.optDouble("m", 0.0).toFloat(),
+                    o.optDouble("h", -1.0)
                 )
             }
         } catch (_: Exception) {

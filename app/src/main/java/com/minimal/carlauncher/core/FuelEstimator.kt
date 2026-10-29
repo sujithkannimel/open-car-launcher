@@ -70,7 +70,14 @@ data class FuelLogRow(
 )
 
 /** A tank measured between two full fills. */
-data class TankResult(val time: Long, val km: Double, val litres: Float, val kmpl: Float)
+data class TankResult(
+    val time: Long,
+    val km: Double,
+    val litres: Float,
+    val kmpl: Float,
+    /** When the tank began (the previous full fill), 0 = unknown. */
+    val startTime: Long = 0L,
+)
 
 data class FuelReplay(
     val state: FuelState,
@@ -78,6 +85,8 @@ data class FuelReplay(
     val tanks: List<TankResult>,
     /** Last odometer the driver typed and the GPS odometer at that moment, or null. */
     val odoRef: Pair<Int, Double>?,
+    /** When the current fuel level was last anchored (set-up or fill-up), 0 = unknown. */
+    val anchorTime: Long = 0L,
 ) {
     /** Estimated car odometer now, or -1 if the driver never typed one. */
     fun estimatedOdo(gpsKm: Double): Int =
@@ -186,6 +195,8 @@ object FuelEstimator {
         val tanks = ArrayList<TankResult>()
         var prevGps = -1.0
         var prevOdo = -1
+        var lastFullTime = 0L
+        var anchorTime = 0L
 
         fun est(g: Double): Int = odoRef?.let { (o, rg) -> (o + max(0.0, g - rg)).toInt() } ?: -1
 
@@ -195,6 +206,7 @@ object FuelEstimator {
             when (e.kind) {
                 FuelEvent.KIND_SETUP -> {
                     s = setup(e.tankL, e.kmpl, e.fraction, e.gpsKm).copy(anchorOdo = odoAt)
+                    anchorTime = e.time
                     rows += FuelLogRow(i, e, odoAt, !typed && odoAt >= 0, -1.0, -1f)
                     prevGps = e.gpsKm; prevOdo = odoAt
                 }
@@ -206,7 +218,7 @@ object FuelEstimator {
                     if (measured != null) {
                         val km = if (odoArg != null && s.lastFullOdo >= 0 && odoArg > s.lastFullOdo)
                             (odoArg - s.lastFullOdo).toDouble() else e.gpsKm - s.lastFullGpsKm
-                        tanks += TankResult(e.time, km, (litres ?: 0f) + s.partialLitresSinceFull, measured)
+                        tanks += TankResult(e.time, km, (litres ?: 0f) + s.partialLitresSinceFull, measured, lastFullTime)
                     }
                     val since = when {
                         prevOdo >= 0 && odoAt >= 0 && odoAt >= prevOdo -> (odoAt - prevOdo).toDouble()
@@ -214,6 +226,8 @@ object FuelEstimator {
                         else -> -1.0
                     }
                     s = fill(s, e.full, litres, odoArg, e.gpsKm)
+                    anchorTime = e.time
+                    if (e.full) lastFullTime = e.time
                     rows += FuelLogRow(i, e, odoAt, !typed && odoAt >= 0, since, measured ?: -1f)
                     prevGps = e.gpsKm; prevOdo = odoAt
                 }
@@ -231,7 +245,7 @@ object FuelEstimator {
             }
             if (typed) odoRef = e.odo to e.gpsKm
         }
-        return FuelReplay(s, rows, tanks, odoRef)
+        return FuelReplay(s, rows, tanks, odoRef, anchorTime)
     }
 
     /** 0 unknown, 2 normal, 3 low, 4 critical (same scale as the battery pill). */

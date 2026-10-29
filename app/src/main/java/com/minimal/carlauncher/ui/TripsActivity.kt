@@ -39,6 +39,7 @@ class TripsActivity : AppCompatActivity() {
         const val EXTRA_TAB = "tab"
         const val TAB_FUEL = "fuel"
         const val TAB_TRIPS = "trips"
+        const val TAB_BATTERY = "battery"
 
         private val BG = Color.rgb(13, 17, 23)
         private val CARD = Color.rgb(22, 27, 34)
@@ -56,11 +57,12 @@ class TripsActivity : AppCompatActivity() {
     private lateinit var content: LinearLayout
     private lateinit var tabFuel: TextView
     private lateinit var tabTrips: TextView
+    private lateinit var tabBattery: TextView
     private var tab = TAB_FUEL
     private val handler = Handler(Looper.getMainLooper())
     private val ticker = object : Runnable {
         override fun run() {
-            if (tab == TAB_TRIPS) render()
+            if (tab == TAB_TRIPS || tab == TAB_BATTERY) render()
             handler.postDelayed(this, 5_000L)
         }
     }
@@ -81,8 +83,10 @@ class TripsActivity : AppCompatActivity() {
         }
         tabFuel = railButton("Fuel") { select(TAB_FUEL) }
         tabTrips = railButton("Trips") { select(TAB_TRIPS) }
+        tabBattery = railButton("Battery") { select(TAB_BATTERY) }
         rail.addView(tabFuel, LinearLayout.LayoutParams(px(130), px(56)).apply { bottomMargin = px(10) })
-        rail.addView(tabTrips, LinearLayout.LayoutParams(px(130), px(56)))
+        rail.addView(tabTrips, LinearLayout.LayoutParams(px(130), px(56)).apply { bottomMargin = px(10) })
+        rail.addView(tabBattery, LinearLayout.LayoutParams(px(130), px(56)))
         rail.addView(View(this), LinearLayout.LayoutParams(1, 0, 1f))
         rail.addView(railButton("Close") { finish() }, LinearLayout.LayoutParams(px(130), px(48)))
         root.addView(rail, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT))
@@ -116,12 +120,17 @@ class TripsActivity : AppCompatActivity() {
         tab = t
         styleRail(tabFuel, t == TAB_FUEL)
         styleRail(tabTrips, t == TAB_TRIPS)
+        styleRail(tabBattery, t == TAB_BATTERY)
         render()
     }
 
     private fun render() {
         content.removeAllViews()
-        if (tab == TAB_FUEL) renderFuel() else renderTrips()
+        when (tab) {
+            TAB_FUEL -> renderFuel()
+            TAB_BATTERY -> renderBattery()
+            else -> renderTrips()
+        }
     }
 
     // ================================================================== fuel
@@ -138,8 +147,10 @@ class TripsActivity : AppCompatActivity() {
             return
         }
 
-        val range = FuelEstimator.rangeKm(s, gps)
-        val level = FuelEstimator.level(s, gps)
+        val now = System.currentTimeMillis()
+        val m = Prefs.fuelModel(now)
+        val range = m.rangeKm
+        val level = com.minimal.carlauncher.core.FuelModel.level(range)
         val rangeColor = when (level) { 4 -> RED; 3 -> AMBER; else -> GREEN }
         val learned = r.tanks.size
         val est = r.estimatedOdo(gps)
@@ -147,11 +158,30 @@ class TripsActivity : AppCompatActivity() {
         content.addView(title("Fuel"))
         content.addView(statRow(listOf(
             Stat("≈ $range km", "RANGE LEFT", rangeColor),
-            Stat(String.format(Locale.US, "%.1f L", FuelEstimator.litresLeft(s, gps)), "IN TANK (OF ${fmt0(s.tankL)} L)", TEXT),
-            Stat(String.format(Locale.US, "%.1f km/l", s.kmpl),
-                if (learned == 0) "MILEAGE (YOUR ESTIMATE)" else "MILEAGE (LEARNED, $learned TANK${if (learned == 1) "" else "S"})", CYAN),
+            Stat(String.format(Locale.US, "%.1f L", m.litresLeft), "IN TANK (OF ${fmt0(s.tankL)} L)", TEXT),
+            Stat(String.format(Locale.US, "%.1f km/l", m.kmplNow),
+                if (learned == 0) "MILEAGE (YOUR ESTIMATE)" else "MILEAGE NOW (LEARNED, $learned TANK${if (learned == 1) "" else "S"})", CYAN),
             Stat(if (est >= 0) String.format(Locale.US, "%,d km", est) else "--", "ODOMETER (BY GPS)", TEXT),
         )))
+        val split = m.tanksUsed > 0
+        val refuel = com.minimal.carlauncher.core.FuelModel.refuelBy(range, m.dailyKm, now)
+        val refuelText = when {
+            range in 0..com.minimal.carlauncher.core.FuelModel.RESERVE_KM -> "Refuel now"
+            refuel == null -> "--"
+            refuel - now < 86_400_000L -> "Today"
+            else -> SimpleDateFormat("EEE d MMM", Locale.US).format(Date(refuel))
+        }
+        content.addView(LinearLayout(this).apply { setPadding(0, px(10), 0, 0); addView(statRow(listOf(
+            Stat(if (split) String.format(Locale.US, "%.1f km/l", m.kmplCity) else "learning", "CITY", TEXT),
+            Stat(if (split) String.format(Locale.US, "%.1f km/l", m.kmplHwy) else "learning", "HIGHWAY (55+ KM/H)", TEXT),
+            Stat(refuelText, if (m.dailyKm > 0) String.format(Locale.US, "REFUEL BY (~%.0f KM/DAY)", m.dailyKm) else "REFUEL BY (NEEDS 3 DAYS)",
+                if (range in 0..90) AMBER else TEXT),
+            Stat(String.format(Locale.US, "%.1f L", m.idleLitresSinceFill), "IDLING SINCE FILL (EST.)",
+                if (m.idleLitresSinceFill > 1f) AMBER else TEXT),
+        )), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)) })
+        if (!split) content.addView(hint("City and highway mileage are learned after a full-to-full tank with litres entered, driven with this version."))
+        else if (m.recentHwyShare >= 0) content.addView(hint(String.format(Locale.US,
+            "Recent driving: %.0f%% highway. Range uses this mix.", m.recentHwyShare * 100)))
         content.addView(buttonRow(listOf(
             "Log fill-up" to { FuelDialog.showFill(this) { render() } },
             "Correct odometer" to { FuelDialog.showCorrectOdometer(this) { render() } },
@@ -196,6 +226,8 @@ class TripsActivity : AppCompatActivity() {
         val now = System.currentTimeMillis()
         val history = Prefs.tripHistory
         val live = liveTrip(now)
+        val fm = Prefs.fuelModel(now)
+        fun litres(t: TripRecord) = com.minimal.carlauncher.core.FuelModel.tripLitres(t, fm.kmplCity, fm.kmplHwy, fm.recentHwyShare)
 
         content.addView(title("This trip"))
         if (live == null) {
@@ -209,6 +241,10 @@ class TripsActivity : AppCompatActivity() {
                 Stat(speed(live.avgKmh), "AVG SPEED", TEXT),
                 Stat(speed(live.maxKmh), "TOP SPEED", TEXT),
             )))
+            content.addView(hint(String.format(Locale.US,
+                "Fuel this trip \u2248 %.2f L (idling %.2f L)%s", litres(live),
+                com.minimal.carlauncher.core.FuelModel.idleLitres(live.idleSec),
+                if (live.hwyKm >= 0 && live.km > 0.5) String.format(Locale.US, " \u00B7 %.0f%% highway", live.hwyKm / live.km * 100) else "")))
         }
 
         val all = if (live != null) history + live else history
@@ -229,6 +265,7 @@ class TripsActivity : AppCompatActivity() {
                 dur(t.durationSec),
                 "avg " + speed(t.avgKmh),
                 "top " + speed(t.maxKmh),
+                String.format(Locale.US, "\u2248%.1f L", litres(t)),
             )
             content.addView(logRow(dayTime.format(Date(t.start)), "", parts.joinToString("   "),
                 if (t.idleSec > 60) "idle " + dur(t.idleSec) else "", null))
@@ -457,11 +494,61 @@ class TripsActivity : AppCompatActivity() {
         if (requestCode == REQ_READ) restore(askPermission = false)
     }
 
-    private fun liveTrip(now: Long): TripRecord? {
-        val start = Prefs.tripStart
-        if (start <= 0L) return null
-        val km = (Prefs.gpsOdoKm - Prefs.curTripGpsStart).coerceAtLeast(0.0)
-        return TripRecord(start, now, km, Prefs.curTripDriveSec, Prefs.curTripIdleSec, Prefs.curTripMaxKmh)
+    private fun liveTrip(now: Long): TripRecord? = Prefs.liveTrip(now)
+
+    // ================================================================== battery
+
+    private fun renderBattery() {
+        val bh = com.minimal.carlauncher.core.BatteryHealth
+        val days = Prefs.batteryLog
+        val v = Prefs.lastVoltage
+        val lastRest = days.lastOrNull { it.resting > 0f }
+        val lastCharge = days.lastOrNull { it.chargeN > 0 }
+        val trend = bh.trendPer30Days(days)
+
+        content.addView(title("Battery"))
+        val band = lastRest?.let { bh.restingBand(it.resting) }
+        val bandColor = when (band) {
+            com.minimal.carlauncher.core.BatteryHealth.Rest.GOOD -> GREEN
+            com.minimal.carlauncher.core.BatteryHealth.Rest.OK -> CYAN
+            com.minimal.carlauncher.core.BatteryHealth.Rest.WEAK -> AMBER
+            com.minimal.carlauncher.core.BatteryHealth.Rest.POOR -> RED
+            null -> TEXT
+        }
+        val chargeOk = lastCharge?.let { it.chargeMin >= bh.CHARGE_LOW && it.chargeMax <= bh.CHARGE_HIGH }
+        content.addView(statRow(listOf(
+            Stat(if (v > 0f) String.format(Locale.US, "%.1f V", v) else "--", "NOW", CYAN),
+            Stat(lastRest?.let { String.format(Locale.US, "%.2f V", it.resting) } ?: "--",
+                "RESTING (${band?.label?.uppercase(Locale.US) ?: "NO READING YET"})", bandColor),
+            Stat(lastCharge?.let { String.format(Locale.US, "%.1f V", it.chargeAvg) } ?: "--",
+                when (chargeOk) { true -> "CHARGING (HEALTHY)"; false -> "CHARGING (CHECK)"; null -> "CHARGING (DRIVE TO MEASURE)" },
+                when (chargeOk) { true -> GREEN; false -> AMBER; null -> TEXT }),
+            Stat(lastCharge?.let { String.format(Locale.US, "%.1f-%.1f", it.chargeMin, it.chargeMax) } ?: "--",
+                "CHARGING RANGE, V (${lastCharge?.day?.let { day.format(java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(it)!!) } ?: "-"})", TEXT),
+        )))
+
+        content.addView(section("Resting voltage at start"))
+        val chart = KmplChartView(this).apply {
+            emptyText = "Appears after a start with the engine not yet running"
+            valueFormat = "%.2f"; axisFormat = "%.1f"; minSpan = 0.6f
+            points = days.filter { it.resting > 0f }.takeLast(30).map { d ->
+                (bh.dayNumber(d.day)?.let { day.format(Date(it * 86_400_000L)) } ?: "") to d.resting
+            }
+        }
+        content.addView(card(chart, px(140)))
+        content.addView(body("Trend: " + bh.trendLabel(trend)))
+
+        content.addView(section("Charging while driving (daily average)"))
+        val chg = KmplChartView(this).apply {
+            emptyText = "Appears after driving with the engine running"
+            valueFormat = "%.1f"; axisFormat = "%.1f"; minSpan = 1.0f
+            points = days.filter { it.chargeN > 0 }.takeLast(30).map { d ->
+                (bh.dayNumber(d.day)?.let { day.format(Date(it * 86_400_000L)) } ?: "") to d.chargeAvg
+            }
+        }
+        content.addView(card(chg, px(140)))
+        content.addView(hint("Healthy: resting 12.4 V or more; charging 13.2 - 15.0 V. Read at the head unit's power wire, " +
+            "about 0.1 - 0.2 V below the battery terminals. For the most telling resting value, check the first start of the day."))
     }
 
     private fun totalStat(t: com.minimal.carlauncher.core.TripTotals, label: String) =
