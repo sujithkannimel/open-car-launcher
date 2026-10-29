@@ -1408,6 +1408,23 @@ class PanelService : Service() {
         Prefs.tripLastSeen = now
         Prefs.tripLastGps = Prefs.gpsOdoKm + pendingKm
         flushTripStats(force = true)
+        maybeAutoBackup()
+    }
+
+    @Volatile private var backingUp = false
+
+    /** Once a day, a backup file in Download/CarLauncher (kept for 7 days). */
+    private fun maybeAutoBackup() {
+        if (backingUp || Prefs.lastAutoBackupDay == com.minimal.carlauncher.core.BackupStore.today()) return
+        backingUp = true
+        Thread {
+            try {
+                com.minimal.carlauncher.core.BackupStore.autoBackupIfDue(this)
+                log("auto backup: " + Prefs.lastAutoBackupDay)
+            } finally {
+                backingUp = false
+            }
+        }.start()
     }
 
     /** Saves the trip that ended at the last heartbeat (car was off since then). */

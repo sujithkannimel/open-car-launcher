@@ -18,6 +18,8 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import android.app.AlertDialog
+import com.minimal.carlauncher.core.BackupStore
 import com.minimal.carlauncher.core.FuelEstimator
 import com.minimal.carlauncher.core.FuelEvent
 import com.minimal.carlauncher.core.Prefs
@@ -47,6 +49,8 @@ class TripsActivity : AppCompatActivity() {
         private val GREEN = Color.rgb(74, 222, 128)
         private val AMBER = Color.rgb(251, 191, 36)
         private val RED = Color.rgb(244, 63, 94)
+        private const val REQ_READ = 41
+        private const val DIALOG = android.R.style.Theme_DeviceDefault_Dialog_Alert
     }
 
     private lateinit var content: LinearLayout
@@ -230,6 +234,87 @@ class TripsActivity : AppCompatActivity() {
                 if (t.idleSec > 60) "idle " + dur(t.idleSec) else "", null))
         }
         content.addView(hint("Distance and speed come from the head unit's GPS. Trips start when the ignition goes on."))
+
+        content.addView(section("Backup"))
+        val last = Prefs.lastAutoBackupDay
+        content.addView(body(
+            (if (last.isEmpty()) "No automatic backup yet." else "Last automatic backup: $last.") +
+                " Trips, fuel log and panel settings are saved daily to Download/CarLauncher (last 7 kept)."
+        ))
+        content.addView(buttonRow(listOf(
+            "Back up now" to { backupNow() },
+            "Restore" to { restore(askPermission = true) },
+        )))
+    }
+
+    // ================================================================== backup
+
+    private fun backupNow() {
+        Thread {
+            val name = BackupStore.write(this, auto = false)
+            runOnUiThread {
+                Toast.makeText(this, if (name != null) "Saved $name in Download/CarLauncher" else "Backup failed",
+                    Toast.LENGTH_LONG).show()
+            }
+        }.start()
+    }
+
+    private val readPermission = android.Manifest.permission.READ_EXTERNAL_STORAGE
+
+    private fun restore(askPermission: Boolean) {
+        val files = BackupStore.list(this)
+        val granted = checkSelfPermission(readPermission) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (!granted && askPermission) {
+            // Needed to see backups from an earlier install or copied in over ADB.
+            requestPermissions(arrayOf(readPermission), REQ_READ)
+            return
+        }
+        if (files.isEmpty()) {
+            AlertDialog.Builder(this, DIALOG)
+                .setTitle("No backups found")
+                .setMessage("Put a backup file (car_launcher_backup_....json) in Download/CarLauncher on the head unit, then try again.")
+                .setPositiveButton("OK", null)
+                .show()
+            return
+        }
+        val shown = files.take(20)
+        AlertDialog.Builder(this, DIALOG)
+            .setTitle("Restore which backup?")
+            .setItems(shown.map { it.name.removePrefix("car_launcher_backup_").removeSuffix(".json").replace("_", "  ") }
+                .toTypedArray()) { _, which -> confirmRestore(shown[which]) }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun confirmRestore(e: BackupStore.Entry) {
+        val parsed = BackupStore.read(this, e)
+        if (parsed == null) {
+            Toast.makeText(this, "That file is not a launcher backup", Toast.LENGTH_LONG).show()
+            return
+        }
+        val trips = com.minimal.carlauncher.core.TripLog.decode(parsed.values[Prefs.KEY_TRIP_HISTORY] as? String).size
+        val fuel = com.minimal.carlauncher.core.FuelEstimator.decode(parsed.values[Prefs.KEY_FUEL_EVENTS] as? String).size
+        AlertDialog.Builder(this, DIALOG)
+            .setTitle("Restore this backup?")
+            .setMessage("${e.name}\n\n$trips trips and $fuel fuel entries. This replaces the current trip history, fuel log and panel settings. The trip in progress keeps counting.")
+            .setPositiveButton("Restore") { _, _ ->
+                Prefs.restore(parsed)
+                // Rebuild the panel with the restored knob and panel settings.
+                try {
+                    startService(android.content.Intent(this, com.minimal.carlauncher.panel.PanelService::class.java)
+                        .setAction(com.minimal.carlauncher.panel.PanelService.ACTION_WAKE))
+                } catch (_: Exception) {}
+                Toast.makeText(this, "Restored", Toast.LENGTH_LONG).show()
+                render()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    @Deprecated("framework callback")
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQ_READ) restore(askPermission = false)
     }
 
     private fun liveTrip(now: Long): TripRecord? {

@@ -52,6 +52,7 @@ object Prefs {
     const val KEY_GPS_ODO = "pref_gps_odo_km"
     const val KEY_FUEL = "pref_fuel_state"
     const val KEY_FUEL_EVENTS = "pref_fuel_events"
+    const val KEY_LAST_AUTO_BACKUP = "pref_last_auto_backup_day"
     const val KEY_TRIP_HISTORY = "pref_trip_history"
     const val KEY_CUR_TRIP_GPS = "pref_cur_trip_gps"
     const val KEY_TRIP_LAST_GPS = "pref_trip_last_gps"
@@ -304,6 +305,44 @@ object Prefs {
     val fuelState: FuelState get() = fuelReplay().state
 
     fun resetFuel() { sp.edit().remove(KEY_FUEL).remove(KEY_FUEL_EVENTS).apply() }
+
+    // ------------------------------------------------ backup
+
+    /** "yyyy-MM-dd" of the last automatic backup. */
+    var lastAutoBackupDay: String
+        get() = sp.getString(KEY_LAST_AUTO_BACKUP, "") ?: ""
+        set(value) = sp.edit().putString(KEY_LAST_AUTO_BACKUP, value).apply()
+
+    fun backupJson(): String = Backup.toJson(sp.all, System.currentTimeMillis())
+
+    /**
+     * Replaces settings, trip history and fuel log with the backup's values. Values that
+     * are not in the backup (the trip in progress, locations) are left alone.
+     */
+    fun restore(b: Backup.Parsed) {
+        val currentKm = gpsOdoKm
+        val e = sp.edit()
+        for ((k, v) in b.values) {
+            when (v) {
+                is String -> e.putString(k, v)
+                is Int -> e.putInt(k, v)
+                is Long -> e.putLong(k, v)
+                is Float -> e.putFloat(k, v)
+                is Boolean -> e.putBoolean(k, v)
+                is Set<*> -> e.putStringSet(k, v.filterIsInstance<String>().toSet())
+            }
+        }
+        e.commit()
+        (b.values[KEY_GPS_ODO] as? Long)?.let { bits ->
+            gpsOdoKm = Backup.mergedGpsKm(java.lang.Double.longBitsToDouble(bits), currentKm)
+        }
+        // Shift the trip in progress by the same amount so it keeps its distance so far.
+        val delta = gpsOdoKm - currentKm
+        if (delta != 0.0) {
+            curTripGpsStart = curTripGpsStart + delta
+            tripLastGps = tripLastGps + delta
+        }
+    }
 
     // ------------------------------------------------ trips
 
