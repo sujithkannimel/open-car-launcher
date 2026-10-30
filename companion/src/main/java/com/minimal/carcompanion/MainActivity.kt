@@ -176,7 +176,10 @@ class MainActivity : Activity() {
         if (d.configured) {
             val frac = (m.litresLeft / d.tank).coerceIn(0f, 1f)
             hero.addView(bar(frac, rc))
-            hero.addView(small(String.format(Locale.US, "%.1f L of %.0f L  ·  %.1f km/l", m.litresLeft, d.tank, m.kmplNow)))
+            hero.addView(small(String.format(Locale.US, "%.1f L of %.0f L  \u00B7  %.1f km/l", m.litresLeft, d.tank, m.kmplNow)))
+            hero.addView(button("\u26FD  Log fill-up") { logFill(d) }, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, px(44)).apply { topMargin = px(10) })
+            if (d.pending.isNotEmpty()) hero.addView(small("Includes ${d.pending.size} fill-up(s) from this phone, waiting for the car to sync."))
         }
         content.addView(hero, lp(bottom = 12))
 
@@ -283,8 +286,22 @@ class MainActivity : Activity() {
         val lastFull = d.fuel.rows.lastOrNull { it.event.kind == FuelEvent.KIND_FILL && it.event.full }
         val sinceFull = lastFull?.let { d.gpsKm - it.event.gpsKm } ?: -1.0
         content.addView(section("Fuel", top = 4))
+        content.addView(button("\u26FD  Log fill-up") { logFill(d) }, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, px(46)).apply { bottomMargin = px(12) })
+        if (d.pending.isNotEmpty()) {
+            content.addView(label("WAITING FOR THE CAR TO SYNC").apply { setPadding(px(4), 0, 0, px(6)) })
+            d.pending.sortedBy { it.time }.forEach { f ->
+                val parts = listOfNotNull(
+                    if (f.litres > 0f) String.format(Locale.US, "%.1f L", f.litres) else null,
+                    String.format(Locale.US, "%,d km", f.odo),
+                )
+                content.addView(row((if (f.full) "Full tank" else "Top-up") + " \u00B7 " + dayFmt.format(Date(f.time)) +
+                    ", " + timeFmt.format(Date(f.time)), parts.joinToString("   "), "\u23F3", null), lp(bottom = 8))
+            }
+            content.addView(hint("The car adds these to its fuel log the next time it's online. The numbers below already include them."))
+        }
         grid(listOf(
-            Stat("≈ ${m.rangeKm} km", "RANGE LEFT", when (FuelModel.level(m.rangeKm)) { 4 -> RED; 3 -> AMBER; else -> GREEN }),
+            Stat("\u2248 ${m.rangeKm} km", "RANGE LEFT", when (FuelModel.level(m.rangeKm)) { 4 -> RED; 3 -> AMBER; else -> GREEN }),
             Stat(String.format(Locale.US, "%.1f L", m.litresLeft), "IN TANK (OF ${d.tank.toInt()} L)", TEXT),
             Stat(String.format(Locale.US, "%.1f km/l", m.kmplNow),
                 if (d.fuel.tanks.isEmpty()) "MILEAGE (ESTIMATE)" else "MILEAGE (LEARNED)", CYAN),
@@ -315,7 +332,7 @@ class MainActivity : Activity() {
             content.addView(row("$what · $whenTxt", parts.joinToString("   "),
                 if (r.measuredKmpl > 0f) String.format(Locale.US, "%.1f km/l", r.measuredKmpl) else "", null), lp(bottom = 8))
         }
-        content.addView(hint("Fill-ups are logged on the head unit (Fuel chip > Log fill-up)."))
+        content.addView(hint("Log fill-ups here or on the head unit (Fuel chip > Log fill-up). The same fill entered on both counts once."))
     }
 
     // ================================================================ battery
@@ -361,10 +378,11 @@ class MainActivity : Activity() {
         val r = repoName; val t = token; val p = passphrase
         Thread {
             val res = CarCloud.fetch(r, t, p)
+            val pending = if (res.data != null) CarCloud.pendingFills(r, t) else emptyList()
             runOnUiThread {
                 loading = false
                 if (res.data != null && res.rawText != null) {
-                    data = res.data
+                    data = res.data.withPending(pending, res.data.fuelEvents)
                     prefs.edit().putString("cache", res.rawText).putString("cacheName", res.data.sourceName).apply()
                 } else {
                     Toast.makeText(this, res.error ?: "Couldn't load", Toast.LENGTH_LONG).show()
@@ -401,6 +419,66 @@ class MainActivity : Activity() {
             }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    private fun logFill(d: CarData) {
+        if (!d.configured) { Toast.makeText(this, "Set up fuel on the head unit first", Toast.LENGTH_LONG).show(); return }
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(px(22), px(8), px(22), 0) }
+        val group = android.widget.RadioGroup(this).apply { orientation = android.widget.RadioGroup.HORIZONTAL }
+        group.addView(android.widget.RadioButton(this).apply { text = "Filled to full"; id = 1; isChecked = true })
+        group.addView(android.widget.RadioButton(this).apply { text = "Added some litres"; id = 2 })
+        col.addView(group)
+        col.addView(small("Litres from the pump (optional for full - helps it learn)"))
+        val litres = EditText(this).apply { inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL }
+        col.addView(litres)
+        val est = d.estOdometer
+        col.addView(small(if (est >= 0) "Odometer km (required - about ${String.format(Locale.US, "%,d", est)} by GPS)" else "Odometer km (required)"))
+        val odo = EditText(this).apply { inputType = InputType.TYPE_CLASS_NUMBER }
+        col.addView(odo)
+        AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle("Log fill-up")
+            .setView(col)
+            .setPositiveButton("Save") { _, _ ->
+                val full = group.checkedRadioButtonId == 1
+                val l = litres.text.toString().toFloatOrNull()
+                val o = odo.text.toString().toIntOrNull()
+                if (o == null || o <= 0) {
+                    Toast.makeText(this, "Enter the odometer reading", Toast.LENGTH_LONG).show(); return@setPositiveButton
+                }
+                if (est >= 0 && kotlin.math.abs(o - est) > 3000) {
+                    Toast.makeText(this, "That odometer is far from the car's (${String.format(Locale.US, "%,d", est)}). Check it.", Toast.LENGTH_LONG).show()
+                    return@setPositiveButton
+                }
+                if (!full && (l == null || l <= 0f)) {
+                    Toast.makeText(this, "Enter the litres you added", Toast.LENGTH_LONG).show(); return@setPositiveButton
+                }
+                val fill = com.minimal.carlauncher.core.InboxFill(
+                    java.util.UUID.randomUUID().toString().replace("-", "").take(12),
+                    System.currentTimeMillis(), full, l ?: -1f, o)
+                Toast.makeText(this, "Saving...", Toast.LENGTH_SHORT).show()
+                val r = repoName; val t = token
+                Thread {
+                    val err = CarCloud.putFill(r, t, fill)
+                    runOnUiThread {
+                        if (err == null) {
+                            Toast.makeText(this, "Saved. The car adds it next time it's online.", Toast.LENGTH_LONG).show()
+                            refresh()
+                        } else {
+                            AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                                .setTitle("Not saved").setMessage(err).setPositiveButton("OK", null).show()
+                        }
+                    }
+                }.start()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun button(t: String, onClick: () -> Unit) = TextView(this).apply {
+        text = t; setTextColor(CYAN); textSize = 15f; typeface = Typeface.DEFAULT_BOLD; gravity = Gravity.CENTER
+        background = rounded(Color.argb(30, 34, 211, 238), Color.argb(140, 34, 211, 238), 12)
+        setPadding(px(18), 0, px(18), 0)
+        setOnClickListener { onClick() }
     }
 
     private fun litres(d: CarData, t: TripRecord) =

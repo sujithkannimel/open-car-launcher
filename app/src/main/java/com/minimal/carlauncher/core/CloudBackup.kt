@@ -141,6 +141,51 @@ object CloudBackup {
 
     fun manualName(): String = PREFIX + SimpleDateFormat("yyyy-MM-dd_HHmm", Locale.US).format(Date()) + ".json"
 
+    const val INBOX = "inbox"
+
+    /**
+     * Merges fill-ups logged on the phone (JSON files in backups/inbox) into the fuel log and deletes
+     * them from the repo. Returns how many were added. Background thread only.
+     */
+    fun processInbox(): Int {
+        if (!Prefs.cloudConfigured) return 0
+        val repo = Prefs.cloudRepo; val token = Prefs.cloudToken
+        val list = try { call("GET", "${repoPath(repo)}/contents/$DIR/$INBOX", token) } catch (_: Exception) { return 0 }
+        if (list.code != 200) return 0
+        val files = try {
+            JSONArray(list.body).let { a ->
+                (0 until a.length()).mapNotNull { a.optJSONObject(it) }
+                    .filter { it.optString("name").endsWith(".json") }
+                    .map { it.optString("name") to it.optString("sha") }
+            }
+        } catch (_: Exception) { return 0 }
+        if (files.isEmpty()) return 0
+        val fills = ArrayList<Pair<InboxFill, Pair<String, String>>>()
+        for ((name, sha) in files) {
+            val r = try { call("GET", "${repoPath(repo)}/contents/$DIR/$INBOX/${enc(name)}", token, raw = true) } catch (_: Exception) { continue }
+            if (r.code != 200) continue
+            val f = InboxFill.parse(r.body)
+            if (f == null) { delete(repo, token, "$DIR/$INBOX/$name", sha); continue }
+            fills += f to (name to sha)
+        }
+        if (fills.isEmpty()) return 0
+        val res = FuelInbox.merge(Prefs.fuelEvents, fills.map { it.first }, Prefs.gpsOdoKm)
+        if (res.added > 0) Prefs.fuelEvents = res.events
+        // Clear what was handled (added or duplicate) so it isn't merged twice.
+        fills.filter { it.first.id in res.processedIds }.forEach { (_, ns) ->
+            delete(repo, token, "$DIR/$INBOX/${ns.first}", ns.second)
+        }
+        return res.added
+    }
+
+    private fun delete(repo: String, token: String, path: String, sha: String) {
+        try {
+            val parts = path.split("/").joinToString("/") { enc(it) }
+            call("DELETE", "${repoPath(repo)}/contents/$parts", token,
+                JSONObject().put("message", "Merged into the car's fuel log").put("sha", sha).toString())
+        } catch (_: Exception) {}
+    }
+
     const val LATEST = "latest.json"
 
     /**

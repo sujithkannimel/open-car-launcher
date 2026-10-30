@@ -1479,6 +1479,7 @@ class PanelService : Service() {
     }
 
     @Volatile private var cloudBusy = false
+    @Volatile private var lastInboxCheck = 0L
     private var lastCloudTry = 0L
 
     /** Once a day to the private GitHub repo; after a failure, retry every 15 min. */
@@ -1487,13 +1488,26 @@ class PanelService : Service() {
         val dailyDone = Prefs.cloudLastDay == com.minimal.carlauncher.core.BackupStore.today()
         val latestDue = Prefs.latestKey() != Prefs.cloudLatestKey ||
             System.currentTimeMillis() - Prefs.cloudLatestAt > 60 * 60_000L
-        if (dailyDone && !latestDue) return
+        val inboxDue = SystemClock.elapsedRealtime() - lastInboxCheck > 15 * 60_000L || lastInboxCheck == 0L
+        if (dailyDone && !latestDue && !inboxDue) return
         val now = SystemClock.elapsedRealtime()
         if (lastCloudTry != 0L && now - lastCloudTry < 15 * 60_000L) return
         lastCloudTry = now
         cloudBusy = true
         Thread {
             try {
+                if (inboxDue) {
+                    val added = com.minimal.carlauncher.core.CloudBackup.processInbox()
+                    lastInboxCheck = SystemClock.elapsedRealtime()
+                    if (added > 0) {
+                        log("cloud: $added fill-up(s) from the phone added")
+                        handler.post {
+                            fuelModelAt = 0L
+                            updateFuelDisplay()
+                            Toast.makeText(this, "Fill-up from your phone added to the fuel log", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }
                 if (com.minimal.carlauncher.core.CloudBackup.uploadIfDue()) log("cloud: " + Prefs.cloudStatus)
                 if (com.minimal.carlauncher.core.CloudBackup.uploadLatestIfDue()) log("cloud: latest.json updated")
             } finally {
