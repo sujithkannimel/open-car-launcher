@@ -34,6 +34,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import com.minimal.carlauncher.R
+import com.minimal.carlauncher.core.Neon
 import com.minimal.carlauncher.core.Prefs
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -292,7 +293,9 @@ class PanelService : Service() {
 
         // Top hairline divider for clean cockpit depth
         val topDivider = View(this).apply {
-            setBackgroundColor(Color.argb(35, 255, 255, 255))
+            // Faint neon hairline: cyan -> violet -> pink, the panel's signature accent.
+            background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
+                Neon.GRADIENT.map { Neon.alpha(it, 150) }.toIntArray())
         }
         root.addView(topDivider, FrameLayout.LayoutParams(M, px(1.5f), Gravity.TOP))
 
@@ -373,7 +376,7 @@ class PanelService : Service() {
 
         val battSubtitle = TextView(this).apply {
             text = "BATTERY"
-            setTextColor(Color.rgb(130, 150, 170))
+            setTextColor(Neon.DIM)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
             typeface = Typeface.DEFAULT_BOLD
             letterSpacing = 0.14f
@@ -381,7 +384,7 @@ class PanelService : Service() {
         }
         val trip = TextView(this).apply {
             text = tripText()
-            setTextColor(Color.rgb(170, 185, 200))
+            setTextColor(Neon.TEXT_2)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
             typeface = Typeface.MONOSPACE
             includeFontPadding = false
@@ -401,7 +404,7 @@ class PanelService : Service() {
             // Weather: phone-style icon + temperature, plain (no pill). Tap = quick summary.
             val wIcon = WeatherIconView(this@PanelService)
             val wTemp = TextView(this@PanelService).apply {
-                setTextColor(Color.rgb(210, 220, 232))
+                setTextColor(Neon.TEXT)
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
                 typeface = Typeface.DEFAULT_BOLD
                 includeFontPadding = false
@@ -464,7 +467,7 @@ class PanelService : Service() {
         }
         fuelBadge.addView(fText)
         val fLabel = TextView(this).apply {
-            setTextColor(Color.rgb(130, 150, 170))
+            setTextColor(Neon.DIM)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
             typeface = Typeface.DEFAULT_BOLD
             letterSpacing = 0.14f
@@ -486,10 +489,13 @@ class PanelService : Service() {
             gravity = Gravity.CENTER
         }
 
-        val btnHome = dockButton(R.drawable.ic_panel_home, 0xFFFF7A45.toInt(), "Home") { openHomeDashboard() }
-        val btnApps = dockButton(R.drawable.ic_panel_apps, 0xFF4D9FFF.toInt(), "Apps") { openAppGrid() }
-        val btnNav = dockButton(R.drawable.ic_panel_nav, 0xFF2ED3C6.toInt(), "Maps") { openMaps() }
-        val btnPhone = dockButton(R.drawable.ic_panel_phone, 0xFF3DDC84.toInt(), "Phone") { openDialer() }
+        dockTiles.clear()
+        val btnHome = dockButton(R.drawable.ic_panel_home, "Home") { openHomeDashboard() }
+        val btnApps = dockButton(R.drawable.ic_panel_apps, "Apps") { openAppGrid() }
+        val btnNav = dockButton(R.drawable.ic_panel_nav, "Maps") { openMaps() }
+        val btnPhone = dockButton(R.drawable.ic_panel_phone, "Phone") { openDialer() }
+        shownDockActive = -2
+        updateDockActive()
 
         for (b in listOf(btnHome, btnApps, btnNav, btnPhone)) {
             centerBar.addView(b, LinearLayout.LayoutParams(W, W).apply {
@@ -607,7 +613,7 @@ class PanelService : Service() {
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
             background = GradientDrawable().apply {
-                setColor(Color.rgb(38, 46, 58))
+                setColor(Neon.SURFACE_HI)
                 setStroke(px(1f), Color.argb(90, 255, 255, 255))
                 cornerRadius = px(10f).toFloat()
             }
@@ -638,30 +644,60 @@ class PanelService : Service() {
 
     // --------------------------------------------------------------------- modern button helper
 
-    /**
-     * Modern dock button: dark glass tile with a hairline accent border, a crisp vector
-     * icon in the accent colour, and a small label underneath. Press = accent wash.
-     */
-    private fun dockButton(iconRes: Int, accent: Int, label: String, onClick: () -> Unit): View {
-        val tileSize = px(64f)
-        val radius = px(20f).toFloat()
-        fun withAlpha(c: Int, a: Int) = Color.argb(a, Color.red(c), Color.green(c), Color.blue(c))
+    /** One dock button's views, so the active app can be lit up without a rebuild. */
+    private class DockTile(val tile: FrameLayout, val icon: android.widget.ImageView,
+                           val caption: TextView, val glow: View)
+    private val dockTiles = ArrayList<DockTile>()
+    private var shownDockActive = -2
+    private val dialerPkg: String? by lazy {
+        try { packageManager.resolveActivity(Intent(Intent.ACTION_DIAL), 0)?.activityInfo?.packageName }
+        catch (_: Exception) { null }
+    }
 
-        val idle = GradientDrawable().apply {
-            cornerRadius = radius
-            setColor(Color.rgb(24, 31, 42))
-            setStroke(px(1.5f), withAlpha(accent, 110))
-        }
-        val pressed = GradientDrawable().apply {
-            cornerRadius = radius
-            setColor(withAlpha(accent, 70))
-            setStroke(px(1.5f), accent)
-        }
-        val tile = FrameLayout(this).apply {
-            background = android.graphics.drawable.StateListDrawable().apply {
-                addState(intArrayOf(android.R.attr.state_pressed), pressed)
-                addState(intArrayOf(), idle)
+    /** Which dock button matches the app in front: 0 Home, 2 Maps, 3 Phone, -1 none. */
+    private fun dockIndexFor(pkg: String?): Int = when {
+        pkg == null -> -1
+        pkg == packageName -> 0
+        pkg == (Prefs.navPackage?.takeIf { it.isNotBlank() } ?: "com.google.android.apps.maps") -> 2
+        pkg == dialerPkg || pkg == "com.android.dialer" -> 3
+        else -> -1
+    }
+
+    /**
+     * Graphite + neon dock: neutral tiles with grey icons; the app in front gets a neon
+     * gradient rim, a cyan icon and a glowing gradient line underneath.
+     */
+    private fun updateDockActive() {
+        if (dockTiles.isEmpty()) return
+        val active = dockIndexFor(currentTopApp())
+        if (active == shownDockActive) return
+        shownDockActive = active
+        val radius = px(20f).toFloat()
+        dockTiles.forEachIndexed { i, t ->
+            val on = i == active
+            t.tile.background = android.graphics.drawable.StateListDrawable().apply {
+                addState(intArrayOf(android.R.attr.state_pressed), GradientDrawable().apply {
+                    cornerRadius = radius; setColor(Neon.alpha(Neon.VIOLET, 70))
+                })
+                addState(intArrayOf(), if (on) {
+                    // Gradient rim: gradient tile with a solid tile inset on top.
+                    val rim = GradientDrawable(GradientDrawable.Orientation.TL_BR, Neon.GRADIENT).apply { cornerRadius = radius }
+                    val fill = GradientDrawable().apply { cornerRadius = radius - px(2f); setColor(Neon.SURFACE) }
+                    android.graphics.drawable.LayerDrawable(arrayOf(rim, fill)).apply {
+                        setLayerInset(1, px(2f), px(2f), px(2f), px(2f))
+                    }
+                } else GradientDrawable().apply { cornerRadius = radius; setColor(Neon.SURFACE) })
             }
+            t.icon.imageTintList = android.content.res.ColorStateList.valueOf(if (on) Neon.CYAN else Neon.ICON)
+            t.caption.setTextColor(if (on) Neon.TEXT else Neon.DIM)
+            t.glow.visibility = if (on) View.VISIBLE else View.INVISIBLE
+        }
+    }
+
+    /** Dock button: neutral tile, grey icon, caption, and a (hidden) neon glow line. */
+    private fun dockButton(iconRes: Int, label: String, onClick: () -> Unit): View {
+        val tileSize = px(64f)
+        val tile = FrameLayout(this).apply {
             isClickable = true
             isFocusable = true
             elevation = px(4f).toFloat()
@@ -670,33 +706,35 @@ class PanelService : Service() {
                 onClick()
             }
         }
-        // Soft accent glow dot behind the icon for depth (flat, no blur).
-        val halo = View(this).apply {
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(withAlpha(accent, 38))
-            }
-        }
-        tile.addView(halo, FrameLayout.LayoutParams(px(44f), px(44f), Gravity.CENTER))
-        val icon = android.widget.ImageView(this).apply {
-            setImageResource(iconRes)
-            imageTintList = android.content.res.ColorStateList.valueOf(accent)
-        }
+        val icon = android.widget.ImageView(this).apply { setImageResource(iconRes) }
         tile.addView(icon, FrameLayout.LayoutParams(px(30f), px(30f), Gravity.CENTER))
 
         val caption = TextView(this).apply {
             text = label
-            setTextColor(Color.rgb(150, 165, 182))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
             gravity = Gravity.CENTER
             letterSpacing = 0.04f
             includeFontPadding = false
         }
+        // Glow line: a soft wide bar behind a crisp thin one, both neon gradient.
+        val glow = FrameLayout(this).apply {
+            addView(View(context).apply {
+                background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
+                    Neon.GRADIENT.map { Neon.alpha(it, 70) }.toIntArray()).apply { cornerRadius = px(4f).toFloat() }
+            }, FrameLayout.LayoutParams(px(40f), px(6f), Gravity.CENTER))
+            addView(View(context).apply {
+                background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, Neon.GRADIENT)
+                    .apply { cornerRadius = px(1.5f).toFloat() }
+            }, FrameLayout.LayoutParams(px(30f), px(3f), Gravity.CENTER))
+            visibility = View.INVISIBLE
+        }
+        dockTiles += DockTile(tile, icon, caption, glow)
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
             addView(tile, LinearLayout.LayoutParams(tileSize, tileSize))
             addView(caption, LinearLayout.LayoutParams(W, W).apply { topMargin = px(6f) })
+            addView(glow, LinearLayout.LayoutParams(px(44f), px(6f)).apply { topMargin = px(2f) })
         }
     }
 
@@ -712,7 +750,7 @@ class PanelService : Service() {
             setTextColor(Color.WHITE)
             textSize = 14f
             gravity = Gravity.CENTER
-            setBackgroundColor(Color.rgb(60, 66, 76))
+            setBackgroundColor(Neon.SURFACE_HI)
             setOnClickListener {
                 hidden = false
                 build()
@@ -873,6 +911,7 @@ class PanelService : Service() {
                 checkReverse()
                 checkZlinkTakeover()
                 updateVolumeDisplay()
+                updateDockActive()
             }
         }
         try {
@@ -1111,7 +1150,7 @@ class PanelService : Service() {
                 chargeAlert == 2 -> "OVERCHARGING"
                 else -> BATT_LABELS[s]
             }
-            setTextColor(if (s >= BATT_LOW || chargeAlert != 0) color else Color.rgb(130, 150, 170))
+            setTextColor(if (s >= BATT_LOW || chargeAlert != 0) color else Neon.DIM)
         }
         pulseAnim?.cancel()
         pulseAnim = null
@@ -1176,7 +1215,7 @@ class PanelService : Service() {
         }
         fuelLabel?.apply {
             text = when (level) { 0 -> "FUEL"; 3 -> "FUEL LOW"; 4 -> "FUEL RESERVE"; else -> "FUEL RANGE" }
-            setTextColor(if (level >= 3) color else Color.rgb(130, 150, 170))
+            setTextColor(if (level >= 3) color else Neon.DIM)
         }
     }
 
@@ -1826,7 +1865,7 @@ class PanelService : Service() {
         private const val BATT_LOW = 3
         private const val BATT_CRITICAL = 4
         private val BATT_COLORS = intArrayOf(
-            0xFF7D93A8.toInt(),  // none   - muted steel
+            Neon.DIM,            // none   - neutral grey
             0xFF22D3EE.toInt(),  // charging - cyan (matches the knob arcs)
             0xFF4ADE80.toInt(),  // normal - green
             0xFFFBBF24.toInt(),  // low    - amber
@@ -1852,7 +1891,7 @@ class PanelService : Service() {
             "com.nwd.mcu.voltage",
         )
 
-        private const val PANEL_BG = 0xFF0D1117.toInt()
+        private const val PANEL_BG = Neon.BG
         private const val PANEL_BG_TRANSPARENT = 0x80000000.toInt()
 
         private const val W = ViewGroup.LayoutParams.WRAP_CONTENT

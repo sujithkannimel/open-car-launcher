@@ -2,6 +2,7 @@ package com.minimal.carlauncher.ui
 
 import android.content.ContentValues
 import android.graphics.Color
+import com.minimal.carlauncher.core.Neon
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
@@ -41,11 +42,11 @@ class TripsActivity : AppCompatActivity() {
         const val TAB_TRIPS = "trips"
         const val TAB_BATTERY = "battery"
 
-        private val BG = Color.rgb(13, 17, 23)
-        private val CARD = Color.rgb(22, 27, 34)
-        private val STROKE = Color.rgb(48, 54, 61)
-        private val DIM = Color.rgb(130, 150, 170)
-        private val TEXT = Color.rgb(225, 232, 240)
+        private val BG = Neon.BG
+        private val CARD = Neon.SURFACE
+        private val STROKE = Neon.DIVIDER
+        private val DIM = Neon.DIM
+        private val TEXT = Neon.TEXT
         private val CYAN = Color.rgb(34, 211, 238)
         private val GREEN = Color.rgb(74, 222, 128)
         private val AMBER = Color.rgb(251, 191, 36)

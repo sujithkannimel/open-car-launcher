@@ -30,19 +30,19 @@ class KmplChartView(context: Context) : View(context) {
         style = Paint.Style.STROKE; strokeWidth = 3f * dens; color = Color.rgb(34, 211, 238)
         strokeJoin = Paint.Join.ROUND; strokeCap = Paint.Cap.ROUND
     }
-    private val dot = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(34, 211, 238) }
+    private val dot = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = com.minimal.carlauncher.core.Neon.VIOLET }
     private val grid = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(40, 255, 255, 255); strokeWidth = dens }
     private val axis = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.rgb(130, 150, 170); textSize = 11f * dens; textAlign = Paint.Align.RIGHT
+        color = com.minimal.carlauncher.core.Neon.DIM; textSize = 11f * dens; textAlign = Paint.Align.RIGHT
     }
     private val label = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.rgb(130, 150, 170); textSize = 11f * dens; textAlign = Paint.Align.CENTER
+        color = com.minimal.carlauncher.core.Neon.DIM; textSize = 11f * dens; textAlign = Paint.Align.CENTER
     }
     private val value = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE; textSize = 12f * dens; textAlign = Paint.Align.CENTER; isFakeBoldText = true
     }
     private val empty = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.rgb(130, 150, 170); textSize = 13f * dens; textAlign = Paint.Align.CENTER
+        color = com.minimal.carlauncher.core.Neon.DIM; textSize = 13f * dens; textAlign = Paint.Align.CENTER
     }
     private val path = Path()
 
@@ -69,6 +69,9 @@ class KmplChartView(context: Context) : View(context) {
         }
         path.reset()
         points.forEachIndexed { i, p -> if (i == 0) path.moveTo(x(i), y(p.second)) else path.lineTo(x(i), y(p.second)) }
+        // Neon gradient along the line, left (oldest) to right (newest).
+        line.shader = android.graphics.LinearGradient(0f, 0f, w, 0f,
+            com.minimal.carlauncher.core.Neon.GRADIENT, null, android.graphics.Shader.TileMode.CLAMP)
         if (points.size > 1) c.drawPath(path, line)
         points.forEachIndexed { i, p ->
             c.drawCircle(x(i), y(p.second), 4.5f * dens, dot)

@@ -387,9 +387,10 @@ class MapPortalController(
         val NIGHT_TILES = ColorMatrixColorFilter(
             ColorMatrix(
                 floatArrayOf(
-                    -0.9f, 0f, 0f, 0f, 235f,
-                    0f, -0.9f, 0f, 0f, 235f,
-                    0f, 0f, -0.9f, 0f, 235f,
+                    // Inverted luminance: a neutral graphite map (no navy tint) with light roads.
+                    -0.27f, -0.53f, -0.10f, 0f, 228f,
+                    -0.27f, -0.53f, -0.10f, 0f, 228f,
+                    -0.27f, -0.53f, -0.10f, 0f, 228f,
                     0f, 0f, 0f, 1f, 0f
                 )
             )

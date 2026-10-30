@@ -30,6 +30,7 @@ import com.minimal.carlauncher.core.BatteryHealth
 import com.minimal.carlauncher.core.CompanionUpdate
 import com.minimal.carlauncher.core.FuelEvent
 import com.minimal.carlauncher.core.FuelModel
+import com.minimal.carlauncher.core.Neon
 import com.minimal.carlauncher.core.TripLog
 import com.minimal.carlauncher.core.TripRecord
 import java.text.SimpleDateFormat
@@ -43,13 +44,14 @@ import java.util.Locale
 class MainActivity : Activity() {
 
     companion object {
-        private val BG = Color.rgb(13, 17, 23)
-        private val CARD = Color.rgb(25, 31, 40)
-        private val CARD_HI = Color.rgb(32, 40, 52)
-        private val BAR = Color.rgb(18, 23, 30)
-        private val DIVIDER = Color.rgb(38, 45, 56)
-        private val DIM = Color.rgb(130, 150, 170)
-        private val TEXT = Color.rgb(225, 232, 240)
+        // Graphite + neon, the same palette as the head unit.
+        private val BG = Neon.BG
+        private val CARD = Neon.SURFACE
+        private val CARD_HI = Neon.SURFACE_HI
+        private val BAR = Neon.BAR
+        private val DIVIDER = Neon.DIVIDER
+        private val DIM = Neon.DIM
+        private val TEXT = Neon.TEXT
         private val CYAN = Color.rgb(34, 211, 238)
         private val GREEN = Color.rgb(74, 222, 128)
         private val AMBER = Color.rgb(251, 191, 36)
@@ -106,7 +108,10 @@ class MainActivity : Activity() {
         titles.addView(TextView(this).apply {
             text = "Car Companion"; setTextColor(TEXT); textSize = 24f; typeface = Typeface.DEFAULT_BOLD
         })
-        subtitle = TextView(this).apply { setTextColor(DIM); textSize = 13f; setPadding(0, px(2), 0, 0) }
+        titles.addView(View(this).apply {
+            background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, Neon.GRADIENT).apply { cornerRadius = px(2).toFloat() }
+        }, LinearLayout.LayoutParams(px(56), px(3)).apply { topMargin = px(4); bottomMargin = px(4) })
+        subtitle = TextView(this).apply { setTextColor(DIM); textSize = 13f }
         titles.addView(subtitle)
         header.addView(titles, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         val refreshBtn = iconButton(R.drawable.ic_refresh, "Refresh") { refresh() }
@@ -216,7 +221,8 @@ class MainActivity : Activity() {
         tab = t
         tabs.forEachIndexed { i, v ->
             val on = i == t
-            v.pill.background = if (on) rounded(Color.argb(46, 34, 211, 238), radius = 16) else null
+            v.pill.background = if (on) GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
+                Neon.GRADIENT.map { Neon.alpha(it, 56) }.toIntArray()).apply { cornerRadius = px(16).toFloat() } else null
             v.icon.setColorFilter(if (on) CYAN else DIM)
             v.text.setTextColor(if (on) TEXT else DIM)
             v.text.typeface = if (on) Typeface.DEFAULT_BOLD else Typeface.DEFAULT

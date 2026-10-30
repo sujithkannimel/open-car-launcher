@@ -2,12 +2,15 @@ package com.minimal.carlauncher.ui.view
 
 import android.content.Context
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.SweepGradient
 import android.graphics.Typeface
 import android.util.AttributeSet
 import android.view.View
 import androidx.core.content.ContextCompat
 import com.minimal.carlauncher.R
+import com.minimal.carlauncher.core.Neon
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.min
@@ -63,6 +66,23 @@ class CompassBezelView @JvmOverloads constructor(
         color = ContextCompat.getColor(context, R.color.cockpit_accent)
     }
 
+    /** Dark theme only: a neon rim (cyan -> violet -> pink -> cyan) around the outside. */
+    private val neon = (resources.configuration.uiMode and
+        android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
+    private val rimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 3f * density
+        color = Color.WHITE
+        setShadowLayer(8f * density, 0f, 0f, Neon.alpha(Neon.VIOLET, 190))
+    }
+    private val rimGlow = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 9f * density
+        color = Color.WHITE
+        alpha = 55
+    }
+    private var rimFor = -1f
+
     /** Ring thickness; the map is inset by exactly this in the layout. */
     private val bezelWidth = resources.getDimension(R.dimen.map_bezel_width)
 
@@ -74,7 +94,18 @@ class CompassBezelView @JvmOverloads constructor(
         val mid = (outer + inner) / 2f
 
         canvas.drawCircle(cx, cy, outer, ringPaint)
-        canvas.drawCircle(cx, cy, outer - edgePaint.strokeWidth / 2f, edgePaint)
+        if (neon) {
+            if (rimFor != cx + cy) {
+                rimFor = cx + cy
+                val sweep = SweepGradient(cx, cy, intArrayOf(Neon.CYAN, Neon.VIOLET, Neon.PINK, Neon.CYAN), null)
+                rimPaint.shader = sweep; rimGlow.shader = sweep
+            }
+            val r = outer - rimPaint.strokeWidth / 2f - 3f * density
+            canvas.drawCircle(cx, cy, r, rimGlow)
+            canvas.drawCircle(cx, cy, r, rimPaint)
+        } else {
+            canvas.drawCircle(cx, cy, outer - edgePaint.strokeWidth / 2f, edgePaint)
+        }
 
         // Ticks every 10 degrees, but the cardinal positions are left for the letters.
         for (deg in 0 until 360 step 10) {

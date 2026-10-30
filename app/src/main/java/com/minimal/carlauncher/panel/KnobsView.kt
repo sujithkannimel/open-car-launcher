@@ -3,14 +3,17 @@ package com.minimal.carlauncher.panel
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.RectF
+import android.graphics.Shader
 import android.graphics.Typeface
 import android.os.Handler
 import android.os.Looper
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
+import com.minimal.carlauncher.core.Neon
 import com.minimal.carlauncher.core.Prefs
 import kotlin.math.asin
 import kotlin.math.atan2
@@ -22,7 +25,7 @@ import kotlin.math.sin
 /**
  * Draws both rotary-knob decorations across the whole strip, using one shared geometry:
  *
- * - the volume number / play-pause icon, glowing cyan, in the visible part of each
+ * - the volume number / play-pause icon, glowing neon, in the visible part of each
  *   knob lens (no filled disc: the lens shows the dark panel), and
  * - a curved arc concentric with that same centre, sitting just outside the bezel,
  *   split into an upper and lower touch zone.
@@ -59,56 +62,66 @@ class KnobsView(
     var showGuides = false
         set(v) { field = v; invalidate() }
 
-    /** Knob content colour: same cyan as the arc glow, with a soft glow of its own. */
-    private val accent = Color.rgb(34, 211, 238)
+    /**
+     * Graphite + neon: white volume number with a violet glow, a pink play icon, and arcs
+     * filled with the cyan -> violet -> pink gradient (shader set per knob in [drawKnob]).
+     */
     private val discText = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = accent
+        color = Neon.TEXT
         typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
         textAlign = Paint.Align.CENTER
-        setShadowLayer(10f, 0f, 0f, Color.argb(170, 34, 211, 238))
+        setShadowLayer(12f, 0f, 0f, Neon.alpha(Neon.VIOLET, 200))
     }
     private val captionPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.argb(200, 125, 170, 200)
+        color = Neon.DIM
         textSize = 11f
         typeface = Typeface.DEFAULT_BOLD
         textAlign = Paint.Align.CENTER
         letterSpacing = 0.18f
     }
     private val iconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = accent
+        color = Neon.PINK
         style = Paint.Style.FILL
-        setShadowLayer(10f, 0f, 0f, Color.argb(170, 34, 211, 238))
+        setShadowLayer(12f, 0f, 0f, Neon.alpha(Neon.PINK, 190))
     }
     private val iconPath = android.graphics.Path()
     private val arcPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeWidth = 3f
-        color = Color.argb(220, 255, 255, 255)
+        strokeWidth = 4f
+        color = Color.WHITE
         strokeCap = Paint.Cap.ROUND
+        setShadowLayer(9f, 0f, 0f, Neon.alpha(Neon.VIOLET, 200))
     }
     private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeWidth = 8f
-        color = Color.argb(80, 0, 229, 255)
+        strokeWidth = 12f
+        color = Color.WHITE
+        alpha = 70
         strokeCap = Paint.Cap.ROUND
     }
     private val pressPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeWidth = 14f
-        color = Color.argb(150, 0, 229, 255)
+        strokeWidth = 16f
+        color = Color.WHITE
+        alpha = 150
         strokeCap = Paint.Cap.ROUND
     }
     private val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE
+        color = Neon.TEXT
         textSize = 22f
         typeface = Typeface.DEFAULT_BOLD
         textAlign = Paint.Align.CENTER
     }
     private val tickPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.argb(150, 140, 175, 210)
+        color = Neon.alpha(Neon.ICON, 150)
         strokeWidth = 2f
         strokeCap = Paint.Cap.ROUND
     }
+
+    /** Top-to-bottom neon gradient across one knob's arc. */
+    private fun neonShader(cy: Float) = LinearGradient(
+        0f, cy - arcR, 0f, cy + arcR, Neon.GRADIENT, null, Shader.TileMode.CLAMP
+    )
     private val guidePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = 2f
@@ -182,6 +195,8 @@ class KnobsView(
         rect.set(cx - arcR, cy - arcR, cx + arcR, cy + arcR)
         val start = if (leftSide) a0 else 180f - a1
         val sweep = a1 - a0
+        val shader = neonShader(cy)
+        glowPaint.shader = shader; arcPaint.shader = shader; pressPaint.shader = shader
         c.drawArc(rect, start, sweep, false, glowPaint)
         c.drawArc(rect, start, sweep, false, arcPaint)
 

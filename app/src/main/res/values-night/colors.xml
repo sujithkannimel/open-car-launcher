@@ -1,24 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Night cockpit: near-black so the display does not wash out the windscreen after dark. -->
+<!--
+  Night cockpit, "graphite + neon": a neutral graphite base (no blue tint) so the screen is
+  calm after dark, with neon cyan as the single accent. The cyan -> violet -> pink gradient
+  is drawn in code (knob rings, compass rim, active dock app); see core/Neon.kt.
+-->
 <resources>
-    <color name="cockpit_bg">#FF07090C</color>
-    <color name="cockpit_surface">#FF141A22</color>
-    <color name="cockpit_surface_alt">#FF1E262F</color>
-    <color name="cockpit_divider">#33FFFFFF</color>
+    <color name="cockpit_bg">#FF0C0D0F</color>
+    <color name="cockpit_surface">#FF17181B</color>
+    <color name="cockpit_surface_alt">#FF222429</color>
+    <color name="cockpit_divider">#1FFFFFFF</color>
 
-    <color name="cockpit_text_primary">#FFF2F5F8</color>
-    <color name="cockpit_text_secondary">#FFC2CCD8</color>
-    <color name="cockpit_text_dim">#FF7C8795</color>
+    <color name="cockpit_text_primary">#FFF3F4F6</color>
+    <color name="cockpit_text_secondary">#FFC4C8CE</color>
+    <color name="cockpit_text_dim">#FF8B9099</color>
 
-    <color name="cockpit_accent">#FF41C7F0</color>
-    <color name="cockpit_accent_dim">#FF2A6E85</color>
-    <color name="cockpit_speed">#FF41C7F0</color>
-    <color name="cockpit_badge">#FFFF5252</color>
+    <color name="cockpit_accent">#FF22D3EE</color>
+    <color name="cockpit_accent_dim">#FF8B5CF6</color>
+    <color name="cockpit_speed">#FFF3F4F6</color>
+    <color name="cockpit_badge">#FFF43F5E</color>
 
-    <color name="cockpit_scrim">#F207090C</color>
-    <color name="cockpit_ripple">#33FFFFFF</color>
+    <color name="cockpit_scrim">#F20C0D0F</color>
+    <color name="cockpit_ripple">#338B5CF6</color>
 
-    <color name="cockpit_hud">#E607090C</color>
-    <color name="cockpit_ok">#FF4CD964</color>
-    <color name="cockpit_warn">#FFFFB020</color>
+    <color name="cockpit_hud">#E60C0D0F</color>
+    <color name="cockpit_ok">#FF4ADE80</color>
+    <color name="cockpit_warn">#FFFBBF24</color>
 </resources>
