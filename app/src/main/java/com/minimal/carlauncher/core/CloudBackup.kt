@@ -141,6 +141,24 @@ object CloudBackup {
 
     fun manualName(): String = PREFIX + SimpleDateFormat("yyyy-MM-dd_HHmm", Locale.US).format(Date()) + ".json"
 
+    const val LATEST = "latest.json"
+
+    /**
+     * Keeps backups/latest.json fresh for the phone companion app: uploads when a trip was
+     * saved or the fuel log changed, and otherwise at most hourly. Background thread only.
+     * Returns true if it uploaded.
+     */
+    fun uploadLatestIfDue(): Boolean {
+        if (!Prefs.cloudConfigured) return false
+        val key = Prefs.latestKey()
+        val now = System.currentTimeMillis()
+        val changed = key != Prefs.cloudLatestKey
+        if (!changed && now - Prefs.cloudLatestAt < 60 * 60_000L) return false
+        val res = upload(Prefs.cloudRepo, Prefs.cloudToken, LATEST, payload())
+        if (res.ok) { Prefs.cloudLatestKey = key; Prefs.cloudLatestAt = now }
+        return res.ok
+    }
+
     /** Daily upload; call from a background thread. Returns true if it ran (ok or not). */
     fun uploadIfDue(): Boolean {
         if (!Prefs.cloudConfigured) return false

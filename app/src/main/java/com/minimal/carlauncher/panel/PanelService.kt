@@ -1484,7 +1484,10 @@ class PanelService : Service() {
     /** Once a day to the private GitHub repo; after a failure, retry every 15 min. */
     private fun maybeCloudUpload() {
         if (cloudBusy || !Prefs.cloudConfigured) return
-        if (Prefs.cloudLastDay == com.minimal.carlauncher.core.BackupStore.today()) return
+        val dailyDone = Prefs.cloudLastDay == com.minimal.carlauncher.core.BackupStore.today()
+        val latestDue = Prefs.latestKey() != Prefs.cloudLatestKey ||
+            System.currentTimeMillis() - Prefs.cloudLatestAt > 60 * 60_000L
+        if (dailyDone && !latestDue) return
         val now = SystemClock.elapsedRealtime()
         if (lastCloudTry != 0L && now - lastCloudTry < 15 * 60_000L) return
         lastCloudTry = now
@@ -1492,6 +1495,7 @@ class PanelService : Service() {
         Thread {
             try {
                 if (com.minimal.carlauncher.core.CloudBackup.uploadIfDue()) log("cloud: " + Prefs.cloudStatus)
+                if (com.minimal.carlauncher.core.CloudBackup.uploadLatestIfDue()) log("cloud: latest.json updated")
             } finally {
                 cloudBusy = false
             }

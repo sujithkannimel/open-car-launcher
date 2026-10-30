@@ -37,7 +37,7 @@ jobs:
 
       - name: Assemble debug APK
         shell: bash
-        run: set -o pipefail; gradle --no-daemon :app:assembleDebug 2>&1 | tee -a build.log
+        run: set -o pipefail; gradle --no-daemon :app:assembleDebug :companion:assembleDebug 2>&1 | tee -a build.log
 
       # Surface compiler / test errors as annotations (readable through the checks API).
       - name: Report build errors
@@ -56,6 +56,13 @@ jobs:
         with:
           name: app-debug
           path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Upload companion APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: car-companion
+          path: companion/build/outputs/apk/debug/companion-debug.apk
           if-no-files-found: error
 
       - name: Upload test report on failure
@@ -140,6 +147,14 @@ jobs:
           mkdir -p dist
           cp app/build/outputs/apk/debug/app-debug.apk \
              "dist/car-launcher-${{ steps.tag.outputs.name }}-debug.apk"
+
+      # Phone companion app ships in the same release (the launcher's updater skips it).
+      - name: Assemble companion APK
+        run: |
+          gradle --no-daemon :companion:assembleDebug
+          mkdir -p dist
+          cp companion/build/outputs/apk/debug/companion-debug.apk \
+             "dist/car-companion-${{ steps.tag.outputs.name }}.apk"
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2

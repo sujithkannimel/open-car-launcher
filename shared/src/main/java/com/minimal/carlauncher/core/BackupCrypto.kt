@@ -32,7 +32,7 @@ object BackupCrypto {
         c.init(Cipher.ENCRYPT_MODE, key(passphrase, salt, ITERATIONS), GCMParameterSpec(128, iv))
         val b64 = Base64.getEncoder()
         return JSONObject()
-            .put("app", Backup.APP_ID).put("enc", "aes-256-gcm").put("iter", ITERATIONS)
+            .put("app", "car_launcher").put("enc", "aes-256-gcm").put("iter", ITERATIONS)
             .put("salt", b64.encodeToString(salt)).put("iv", b64.encodeToString(iv))
             .put("data", b64.encodeToString(c.doFinal(plain.toByteArray(Charsets.UTF_8))))
             .toString()

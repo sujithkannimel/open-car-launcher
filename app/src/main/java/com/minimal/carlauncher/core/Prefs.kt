@@ -58,6 +58,8 @@ object Prefs {
     const val KEY_CLOUD_PASS = "pref_cloud_pass"
     const val KEY_CLOUD_LAST_DAY = "pref_cloud_last_day"
     const val KEY_CLOUD_STATUS = "pref_cloud_status"
+    const val KEY_CLOUD_LATEST_KEY = "pref_cloud_latest_key"
+    const val KEY_CLOUD_LATEST_AT = "pref_cloud_latest_at"
     const val KEY_TRIP_HISTORY = "pref_trip_history"
     const val KEY_CUR_TRIP_GPS = "pref_cur_trip_gps"
     const val KEY_TRIP_LAST_GPS = "pref_trip_last_gps"
@@ -347,6 +349,20 @@ object Prefs {
     var cloudStatus: String
         get() = sp.getString(KEY_CLOUD_STATUS, "") ?: ""
         set(value) = sp.edit().putString(KEY_CLOUD_STATUS, value).apply()
+
+    /** What latest.json last contained (trips + fuel log), to skip unchanged uploads. */
+    var cloudLatestKey: String
+        get() = sp.getString(KEY_CLOUD_LATEST_KEY, "") ?: ""
+        set(value) = sp.edit().putString(KEY_CLOUD_LATEST_KEY, value).apply()
+
+    var cloudLatestAt: Long
+        get() = sp.getLong(KEY_CLOUD_LATEST_AT, 0L)
+        set(value) = sp.edit().putLong(KEY_CLOUD_LATEST_AT, value).apply()
+
+    /** Changes whenever a trip is saved or the fuel log is edited. */
+    fun latestKey(): String =
+        (sp.getString(KEY_TRIP_HISTORY, "") ?: "").hashCode().toString() + "/" +
+            (sp.getString(KEY_FUEL_EVENTS, "") ?: "").hashCode().toString()
 
     val cloudConfigured: Boolean get() = cloudRepo.contains('/') && cloudToken.isNotEmpty()
 

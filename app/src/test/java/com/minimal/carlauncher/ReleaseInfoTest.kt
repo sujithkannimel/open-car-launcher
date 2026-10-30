@@ -51,6 +51,22 @@ class ReleaseInfoTest {
     }
 
     @Test
+    fun `never picks the phone companion apk`() {
+        val info = release(
+            """
+            {
+              "tag_name": "v0.25",
+              "assets": [
+                {"name": "car-companion-v0.25.apk", "browser_download_url": "https://example.test/comp.apk"},
+                {"name": "car-launcher-v0.25-debug.apk", "browser_download_url": "https://example.test/launcher.apk"}
+              ]
+            }
+            """.trimIndent()
+        )
+        assertEquals("https://example.test/launcher.apk", info?.apkUrl)
+    }
+
+    @Test
     fun `ignores non-apk assets`() {
         val info = release(
             """

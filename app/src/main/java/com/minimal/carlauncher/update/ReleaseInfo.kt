@@ -32,6 +32,8 @@ data class ReleaseInfo(
                     val asset = assets.optJSONObject(i) ?: continue
                     val assetName = asset.optString("name", "")
                     if (!assetName.endsWith(".apk", ignoreCase = true)) continue
+                    // The phone companion app ships in the same release: never install it here.
+                    if (assetName.contains("companion", ignoreCase = true)) continue
                     val url = asset.optString("browser_download_url", "")
                     if (url.isBlank()) continue
                     val size = asset.optLong("size", 0L)

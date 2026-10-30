@@ -26,6 +26,7 @@ object Backup {
         // Secrets and cloud bookkeeping: never written into a backup file.
         Prefs.KEY_CLOUD_REPO, Prefs.KEY_CLOUD_TOKEN, Prefs.KEY_CLOUD_PASS,
         Prefs.KEY_CLOUD_LAST_DAY, Prefs.KEY_CLOUD_STATUS,
+        Prefs.KEY_CLOUD_LATEST_KEY, Prefs.KEY_CLOUD_LATEST_AT,
     )
 
     fun toJson(values: Map<String, *>, createdMs: Long): String {
