@@ -146,7 +146,9 @@ jobs:
           gradle --no-daemon :app:assembleDebug
           mkdir -p dist
           cp app/build/outputs/apk/debug/app-debug.apk \
-             "dist/car-launcher-${{ steps.tag.outputs.name }}-debug.apk"
+             "dist/car-launcher-${{ steps.tag.outputs.name }}-release.apk"
+          # The name must contain "release": head units on v0.24 or older pick the first
+          # APK otherwise, which is the phone companion (alphabetically first).
 
       # Phone companion app ships in the same release (the launcher's updater skips it).
       - name: Assemble companion APK
