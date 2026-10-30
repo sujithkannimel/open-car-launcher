@@ -153,8 +153,9 @@ jobs:
         run: |
           gradle --no-daemon :companion:assembleDebug
           mkdir -p dist
-          cp companion/build/outputs/apk/debug/companion-debug.apk \
-             "dist/car-companion-${{ steps.tag.outputs.name }}.apk"
+          # Named after the companion's own version, which its update check reads.
+          CV=$(sed -n 's/.*versionName *= *"\([^"]*\)".*/\1/p' companion/build.gradle.kts | head -1)
+          cp companion/build/outputs/apk/debug/companion-debug.apk "dist/car-companion-${CV}.apk"
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
