@@ -173,14 +173,13 @@ class LiveCardsController(
         val art: Bitmap? = md?.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
             ?: md?.getBitmap(MediaMetadata.METADATA_KEY_ART)
             ?: md?.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON)
-        binding.iconMusic.visibility = View.GONE
         if (art != null) {
             binding.coverMusic.setImageBitmap(art)
             binding.coverMusic.visibility = View.VISIBLE
-            binding.eqMusic.visibility = View.GONE
+            binding.iconMusic.visibility = View.GONE
         } else {
             binding.coverMusic.visibility = View.GONE
-            binding.eqMusic.visibility = View.VISIBLE
+            binding.iconMusic.visibility = View.VISIBLE
         }
         binding.eqMusic.playing = isPlaying
         showControls(isPlaying)
@@ -189,9 +188,8 @@ class LiveCardsController(
     private fun showAndroidAuto(isPlaying: Boolean) {
         binding.titleMusic.text = ZlinkStatus.modeLabel()
         binding.subtitleMusic.text = activity.getString(if (isPlaying) R.string.music_playing else R.string.music_paused)
-        binding.iconMusic.visibility = View.GONE
+        binding.iconMusic.visibility = View.VISIBLE
         binding.coverMusic.visibility = View.GONE
-        binding.eqMusic.visibility = View.VISIBLE
         binding.eqMusic.playing = isPlaying
         showControls(isPlaying)
     }
@@ -200,7 +198,6 @@ class LiveCardsController(
         binding.titleMusic.setText(R.string.card_music)
         binding.iconMusic.visibility = View.VISIBLE
         binding.coverMusic.visibility = View.GONE
-        binding.eqMusic.visibility = View.GONE
         binding.eqMusic.playing = false
         binding.musicControls.visibility = View.GONE
         cards.refreshMusicLabel()

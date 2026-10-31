@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Play / pause: a neon gradient disc (cyan -> violet -> pink). -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="#55FFFFFF">
+    <item>
+        <shape android:shape="oval">
+            <gradient
+                android:angle="315"
+                android:centerColor="#FF8B5CF6"
+                android:endColor="#FFF472B6"
+                android:startColor="#FF22D3EE" />
+        </shape>
+    </item>
+</ripple>
