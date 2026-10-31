@@ -532,7 +532,7 @@ class PanelService : Service() {
             gravity = Gravity.CENTER
         }
         val readout = TextView(this).apply {
-            setTextColor(Color.rgb(255, 64, 129))
+            setTextColor(Neon.PINK)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
             typeface = Typeface.MONOSPACE
             gravity = Gravity.CENTER
@@ -545,9 +545,9 @@ class PanelService : Service() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
         }
-        fun targetText() = when (adjustTarget) { 1 -> "LEFT"; 2 -> "RIGHT"; else -> "BOTH" }
+        fun targetText() = when (adjustTarget) { 1 -> "LEFT"; 2 -> "RIGHT"; 3 -> "VOL"; 4 -> "PLAY"; else -> "BOTH" }
         row.addView(adjustButton(targetText(), wide = true, repeat = false) {
-            adjustTarget = (adjustTarget + 1) % 3
+            adjustTarget = (adjustTarget + 1) % 5
             (it as TextView).text = targetText()
             refreshReadout()
         })
@@ -574,6 +574,18 @@ class PanelService : Service() {
      * their edges. Prefs.knobRightX is measured from the right edge.
      */
     private fun nudge(dx: Int = 0, dy: Int = 0) {
+        // VOL / PLAY: move only the number or icon inside its lens (screen direction).
+        if (adjustTarget == 3 || adjustTarget == 4) {
+            if (adjustTarget == 3) {
+                Prefs.volDx = (Prefs.volDx + dx).coerceIn(-80, 80)
+                Prefs.volDy = (Prefs.volDy + dy).coerceIn(-80, 80)
+            } else {
+                Prefs.playDx = (Prefs.playDx + dx).coerceIn(-80, 80)
+                Prefs.playDy = (Prefs.playDy + dy).coerceIn(-80, 80)
+            }
+            knobChanged()
+            return
+        }
         if (adjustTarget != 2) {
             Prefs.knobLeftX = (Prefs.knobLeftX + dx).coerceIn(-100, 400)
             Prefs.knobLeftY = (Prefs.knobLeftY + dy).coerceIn(-100, 300)
@@ -594,9 +606,9 @@ class PanelService : Service() {
 
     private fun refreshReadout() {
         adjustReadout?.text = String.format(
-            Locale.US, "L x%d y%d   R x%d y%d   disc %d   arc %d",
+            Locale.US, "L x%d y%d   R x%d y%d   disc %d   arc %d   vol %+d,%+d   play %+d,%+d",
             Prefs.knobLeftX, Prefs.knobLeftY, Prefs.knobRightX, Prefs.knobRightY,
-            Prefs.knobDisc, Prefs.knobArcRadius
+            Prefs.knobDisc, Prefs.knobArcRadius, Prefs.volDx, Prefs.volDy, Prefs.playDx, Prefs.playDy
         )
     }
 

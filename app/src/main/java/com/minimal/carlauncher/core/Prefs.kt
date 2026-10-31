@@ -79,6 +79,13 @@ object Prefs {
     const val KEY_KNOB_RY = "pref_knob_right_y"
     const val KEY_KNOB_DISC = "pref_knob_disc"
     const val KEY_KNOB_ARC = "pref_knob_arc_radius"
+    const val KEY_VOL_DX = "pref_knob_vol_dx"
+    const val KEY_VOL_DY = "pref_knob_vol_dy"
+    const val KEY_PLAY_DX = "pref_knob_play_dx"
+    const val KEY_PLAY_DY = "pref_knob_play_dy"
+    /** Default shift of the volume number / play icon inside the lens: down and outward. */
+    const val DEF_CONTENT_DX = 8
+    const val DEF_CONTENT_DY = 8
 
     // Defaults for the K2401 knobs, in panel pixels (1 dp == 1 px at 160 dpi).
     // Fine-tune on the unit: long-press the battery pill -> adjust mode.
@@ -493,11 +500,29 @@ object Prefs {
         get() = sp.getInt(KEY_KNOB_ARC, DEF_KNOB_ARC)
         set(value) = sp.edit().putInt(KEY_KNOB_ARC, value).apply()
 
+    /**
+     * Shift of the knob content inside the lens, in screen px (+x right, +y down). Defaults
+     * move the volume number down-left and the play icon down-right, toward each lens centre.
+     */
+    var volDx: Int
+        get() = sp.getInt(KEY_VOL_DX, -DEF_CONTENT_DX)
+        set(value) = sp.edit().putInt(KEY_VOL_DX, value).apply()
+    var volDy: Int
+        get() = sp.getInt(KEY_VOL_DY, DEF_CONTENT_DY)
+        set(value) = sp.edit().putInt(KEY_VOL_DY, value).apply()
+    var playDx: Int
+        get() = sp.getInt(KEY_PLAY_DX, DEF_CONTENT_DX)
+        set(value) = sp.edit().putInt(KEY_PLAY_DX, value).apply()
+    var playDy: Int
+        get() = sp.getInt(KEY_PLAY_DY, DEF_CONTENT_DY)
+        set(value) = sp.edit().putInt(KEY_PLAY_DY, value).apply()
+
     fun resetKnobGeometry() {
         sp.edit()
             .remove(KEY_KNOB_LX).remove(KEY_KNOB_LY)
             .remove(KEY_KNOB_RX).remove(KEY_KNOB_RY)
             .remove(KEY_KNOB_DISC).remove(KEY_KNOB_ARC)
+            .remove(KEY_VOL_DX).remove(KEY_VOL_DY).remove(KEY_PLAY_DX).remove(KEY_PLAY_DY)
             .apply()
     }
 }

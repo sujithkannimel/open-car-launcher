@@ -178,7 +178,10 @@ class KnobsView(
         // Centre text goes where the screen actually shows through the lens: the knob
         // centres sit near the screen's bottom corners, so the true centre is partly
         // off-screen and text drawn there would be cut in half.
-        val (tx, tyc, room) = visibleCentre(cx, cy, min(discR, arcR * 0.6f))
+        val (vx, vy, room) = visibleCentre(cx, cy, min(discR, arcR * 0.6f))
+        // User offset (adjust mode): VOL / PLAY targets nudge the content inside the lens.
+        val tx = vx + (if (leftSide) Prefs.volDx else Prefs.playDx)
+        val tyc = vy + (if (leftSide) Prefs.volDy else Prefs.playDy)
         if (leftSide) {
             discText.textSize = (room * 0.9f).coerceIn(20f, 54f)
             val numY = tyc - (if (caption != null) 6f else 0f)
