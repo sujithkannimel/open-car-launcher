@@ -313,11 +313,17 @@ class MainActivity : Activity() {
         content.addView(section("Today"))
         if (today.isEmpty()) content.addView(body("No finished trips today yet."))
         else grid(listOf(
-            Stat(String.format(Locale.US, "%.0f km", today.sumOf { it.km }), "${today.size} trip${if (today.size == 1) "" else "s"}", CYAN),
+            Stat(String.format(Locale.US, "%.0f km", today.sumOf { it.km }),
+                today.count { !it.isParked }.let { n -> "$n trip${if (n == 1) "" else "s"}" }, CYAN),
             Stat(String.format(Locale.US, "≈%.1f L", today.sumOf { litres(d, it).toDouble() }), "Fuel (est.)", TEXT),
             Stat(dur(today.sumOf { it.driveSec }), "Driving", TEXT),
             Stat(dur(today.sumOf { it.idleSec }), "Idling", if (today.sumOf { it.idleSec } > 1200) AMBER else TEXT),
         ))
+        today.filter { it.isParked }.takeIf { it.isNotEmpty() }?.let { p ->
+            val sec = p.sumOf { it.idleSec }
+            content.addView(body(String.format(Locale.US, "Parked with the engine running: %s (\u2248%.1f L)",
+                dur(sec), FuelModel.idleLitres(sec))))
+        }
 
         // Alerts
         val alerts = ArrayList<Pair<String, Int>>()
@@ -358,8 +364,9 @@ class MainActivity : Activity() {
                 lastDay = dayName
                 content.addView(label(dayName).apply { typeface = Typeface.DEFAULT_BOLD; setPadding(px(4), px(12), 0, px(8)) })
             }
-            val right = String.format(Locale.US, "%.1f km", t.km)
-            val detail = "${timeFmt.format(Date(t.start))} - ${timeFmt.format(Date(t.end))}  ·  ${dur(t.durationSec)}  ·  " +
+            val right = if (t.isParked) "Parked" else String.format(Locale.US, "%.1f km", t.km)
+            val detail = "${timeFmt.format(Date(t.start))} - ${timeFmt.format(Date(t.end))}  ·  " +
+                (if (t.isParked) "idling ${dur(t.idleSec)}" else dur(t.durationSec)) + "  ·  " +
                 String.format(Locale.US, "≈%.1f L", litres(d, t))
             content.addView(row(detail, null, right) { tripDetail(d, t) }, lp(bottom = 8))
         }

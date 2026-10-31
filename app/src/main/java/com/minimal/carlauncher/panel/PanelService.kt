@@ -1073,6 +1073,7 @@ class PanelService : Service() {
                 canVolts = v
                 voltSeq++
                 Prefs.lastVoltage = v
+                lastVoltAt = SystemClock.elapsedRealtime()
                 onVoltageReading(v)
                 return
             }
@@ -1265,7 +1266,9 @@ class PanelService : Service() {
         if (d / dt > 70.0) return                                  // > 250 km/h: a GPS jump
         // Trip timing: moving vs idling (engine on, standing still).
         val mps = if (l.hasSpeed()) l.speed.toDouble() else d / dt
-        if (mps >= 1.5) tripDriveAcc += dt else tripIdleAcc += dt
+        // Standing still only counts as idling while the engine runs (alternator charging);
+        // with just the screen on (ACC) no fuel is used. No recent reading: count it.
+        if (mps >= 1.5) tripDriveAcc += dt else if (engineMaybeRunning()) tripIdleAcc += dt
         if (l.hasSpeed() && l.speed < 70f) tripMaxKmh = maxOf(tripMaxKmh, l.speed * 3.6f)
         flushTripStats(force = false)
         if (d < 5.0 || (l.hasSpeed() && l.speed < 1f && d < 30.0)) return   // parked jitter
@@ -1290,6 +1293,9 @@ class PanelService : Service() {
         zlinkReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
                 val status = intent.getStringExtra("status") ?: return
+                // Shared with the home screen's Phone Link and Music cards.
+                if (com.minimal.carlauncher.core.ZlinkStatus.onBroadcast(status, intent.getStringExtra("phoneMode")))
+                    log("zlink: $status")
                 if (!Prefs.stayOnConnect) return
                 if (status == "ACTION_ZJ_PHONEFOUND" || (status == "CONNECTED" && stayUntilMs == 0L)) {
                     val top = currentTopApp()
@@ -1583,6 +1589,14 @@ class PanelService : Service() {
         }.start()
     }
 
+    @Volatile private var lastVoltAt = 0L
+
+    /** False only when a fresh voltage reading says the alternator is not charging. */
+    private fun engineMaybeRunning(): Boolean {
+        if (lastVoltAt == 0L || SystemClock.elapsedRealtime() - lastVoltAt > 5 * 60_000L) return true
+        return (canVolts ?: return true) >= ENGINE_ON_VOLTS
+    }
+
     /** Saves the trip that ended at the last heartbeat (car was off since then). */
     private fun finishTrip() {
         val start = Prefs.tripStart
@@ -1596,7 +1610,8 @@ class PanelService : Service() {
             Prefs.curTripHwyKm.toDouble().coerceAtMost(km)
         )
         Prefs.tripHistory = com.minimal.carlauncher.core.TripLog.append(Prefs.tripHistory, rec)
-        log(String.format(Locale.US, "trip saved: %.1f km", km))
+        log(if (rec.isParked) String.format(Locale.US, "parked idling saved: %d min", rec.idleSec / 60)
+            else String.format(Locale.US, "trip saved: %.1f km", km))
     }
 
     private var tripDriveAcc = 0.0
@@ -1861,6 +1876,8 @@ class PanelService : Service() {
         private const val TRIP_GAP_MS = 3 * 60_000L
         const val ZLINK_ACTION = "com.zjinnova.zlink"
         const val ZLINK_PKG = "com.zjinnova.zlink"
+        /** Above this the alternator is charging, so the engine is running. */
+        const val ENGINE_ON_VOLTS = 13.0f
 
         /** Screens the stay-on-screen logic must never bring back (reverse camera). */
         private val NEVER_RETURN_TO = setOf("com.nwd.backcar")

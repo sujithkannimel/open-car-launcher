@@ -27,6 +27,9 @@ class QuickCardsController(
     private val scope: CoroutineScope
 ) {
 
+    /** Set by the live Music card: returns true when it handled the tap (a player is active). */
+    var musicTap: (() -> Boolean)? = null
+
     fun bind() {
         binding.cardProjection.setOnClickListener { launchProjection() }
         binding.cardProjection.setOnLongClickListener {
@@ -40,7 +43,7 @@ class QuickCardsController(
             true
         }
 
-        binding.cardMusic.setOnClickListener { launchStoredOrPick(it, Slot.MUSIC) }
+        binding.cardMusic.setOnClickListener { if (musicTap?.invoke() != true) launchStoredOrPick(it, Slot.MUSIC) }
         binding.cardMusic.setOnLongClickListener {
             pick(Slot.MUSIC)
             true
@@ -51,8 +54,16 @@ class QuickCardsController(
 
     fun refreshLabels() {
         bindSubtitle(binding.subtitleNav, Prefs.navPackage, R.string.card_not_set)
-        bindSubtitle(binding.subtitleMusic, Prefs.musicPackage, R.string.card_not_set)
+        refreshMusicLabel()
+        refreshProjectionLabel()
+    }
 
+    fun refreshMusicLabel() = bindSubtitle(binding.subtitleMusic, Prefs.musicPackage, R.string.card_not_set)
+
+    /** Opens the phone projection app (ZLink), as a tap on the Phone Link card does. */
+    fun openProjection() = launchProjection()
+
+    fun refreshProjectionLabel() {
         val projection = Prefs.projectionPackage ?: firstInstalledProjection()
         if (projection == null) {
             binding.subtitleProjection.setText(R.string.projection_hint)

@@ -85,4 +85,21 @@ class FuelReplayTest {
         assertEquals(list, TripLog.decode(TripLog.encode(list)))
         assertEquals((12.0 / (500 / 3600.0)).toFloat(), t1.avgKmh, 0.1f)
     }
+
+    @Test
+    fun parkedIdlingIsKeptButNotCountedAsATrip() {
+        val drive = TripRecord(1_000L, 601_000L, 12.0, 500L, 100L, 80f)
+        val parked = TripRecord(700_000L, 3_700_000L, 0.05, 20L, 2_900L, 4f)
+        val brief = TripRecord(4_000_000L, 4_100_000L, 0.0, 0L, 90L, 0f)
+        assertTrue(parked.isParked)
+        assertFalse(drive.isParked)
+        assertTrue(TripLog.worthKeeping(parked))
+        assertFalse(TripLog.worthKeeping(brief))
+        val list = listOf(drive, parked, brief).fold(emptyList<TripRecord>()) { l, t -> TripLog.append(l, t) }
+        assertEquals(2, list.size)
+        val tot = TripLog.totals(list, 0L)
+        assertEquals(1, tot.trips)
+        assertEquals(12.0, tot.km, 0.001)
+        assertEquals(3_000L, TripLog.idleSince(list, 0L))
+    }
 }

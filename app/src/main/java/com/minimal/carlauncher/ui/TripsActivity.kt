@@ -256,11 +256,24 @@ class TripsActivity : AppCompatActivity() {
             totalStat(TripLog.totals(all, TripLog.startOfMonth(now)), "THIS MONTH"),
             totalStat(TripLog.totals(all, 0L), "ALL RECORDED"),
         )))
+        val parkedToday = all.filter { it.isParked && it.start >= TripLog.startOfToday(now) }
+        if (parkedToday.isNotEmpty()) {
+            val sec = parkedToday.sumOf { it.idleSec }
+            content.addView(body(String.format(Locale.US,
+                "Parked with the engine running today: %s (\u2248%.1f L).", dur(sec),
+                com.minimal.carlauncher.core.FuelModel.idleLitres(sec))))
+        }
         content.addView(buttonRow(listOf("Export CSV" to { export() })))
 
         content.addView(section("Recent trips"))
         if (history.isEmpty()) content.addView(body("Finished trips appear here."))
         history.asReversed().take(60).forEach { t ->
+            if (t.isParked) {
+                content.addView(logRow(dayTime.format(Date(t.start)), "", "Parked idling   " + dur(t.durationSec),
+                    String.format(Locale.US, "idle %s  \u2248%.1f L", dur(t.idleSec),
+                        com.minimal.carlauncher.core.FuelModel.idleLitres(t.idleSec)), null))
+                return@forEach
+            }
             val parts = listOf(
                 String.format(Locale.US, "%.1f km", t.km),
                 dur(t.durationSec),

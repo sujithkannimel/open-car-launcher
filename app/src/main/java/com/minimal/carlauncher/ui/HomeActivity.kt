@@ -49,6 +49,7 @@ class HomeActivity : AppCompatActivity() {
     private lateinit var cards: QuickCardsController
     private lateinit var map: MapPortalController
     private lateinit var radioWidget: RadioWidgetController
+    private lateinit var liveCards: LiveCardsController
 
     private val app: CarLauncherApp get() = application as CarLauncherApp
 
@@ -93,6 +94,8 @@ class HomeActivity : AppCompatActivity() {
         cards.bind()
         map.bind()
         radioWidget.bind()
+        liveCards = LiveCardsController(this, binding, cards)
+        liveCards.bind()
 
         bindDashboardClicks()
         bindDockActions()
@@ -350,6 +353,7 @@ class HomeActivity : AppCompatActivity() {
         app.radioRepository.start()
         viewModel.refreshPrefs()
         cards.refreshLabels()
+        liveCards.start()
         render(viewModel.vehicle.value)
         maybeAutoStartDashcam()
         maybeStartPanel()
@@ -409,6 +413,7 @@ class HomeActivity : AppCompatActivity() {
         viewModel.stop()
         map.onPause()
         app.radioRepository.stop()
+        liveCards.stop()
         leftAtElapsedMs = SystemClock.elapsedRealtime()
     }
 

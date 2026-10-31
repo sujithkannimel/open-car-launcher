@@ -359,7 +359,7 @@
                 android:layout_marginTop="2dp"
                 android:format12Hour="EEEE"
                 android:format24Hour="EEEE"
-                android:textColor="@color/cockpit_accent"
+                android:textColor="@color/cockpit_text_secondary"
                 android:textSize="@dimen/date_text"
                 tools:text="TUESDAY" />
 
@@ -405,7 +405,8 @@
                     android:contentDescription="@string/radio_seek_down"
                     android:padding="12dp"
                     android:scaleType="fitCenter"
-                    android:src="@drawable/ic_remove" />
+                    android:src="@drawable/ic_remove"
+                    android:tint="@color/cockpit_text_primary" />
 
                 <!-- Tap: open the native radio. Long-press: choose which app that is. -->
                 <LinearLayout
@@ -443,7 +444,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="@string/radio_band_fm"
-                        android:textColor="@color/cockpit_accent" />
+                        android:textColor="@color/cockpit_text_dim" />
 
                     <TextView
                         android:id="@+id/textRadioStation"
@@ -480,7 +481,7 @@
                         android:gravity="center"
                         android:maxLines="2"
                         android:text="@string/radio_grant_access"
-                        android:textColor="@color/cockpit_warn"
+                        android:textColor="@color/cockpit_text_dim"
                         android:textSize="@dimen/radio_rt_text" />
                 </LinearLayout>
 
@@ -492,7 +493,8 @@
                     android:contentDescription="@string/radio_seek_up"
                     android:padding="12dp"
                     android:scaleType="fitCenter"
-                    android:src="@drawable/ic_add" />
+                    android:src="@drawable/ic_add"
+                    android:tint="@color/cockpit_text_primary" />
             </LinearLayout>
 
             <!-- Presets: tap to tune, long-press to store the current station. -->
@@ -660,12 +662,33 @@
                 android:orientation="vertical"
                 android:padding="@dimen/tile_padding">
 
-                <ImageView
-                    android:id="@+id/iconMusic"
+                <!-- Icon normally; album art or a neon equaliser while something plays. -->
+                <FrameLayout
                     android:layout_width="@dimen/card_icon"
-                    android:layout_height="@dimen/card_icon"
-                    android:contentDescription="@null"
-                    android:src="@drawable/ic_music" />
+                    android:layout_height="@dimen/card_icon">
+
+                    <ImageView
+                        android:id="@+id/iconMusic"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:contentDescription="@null"
+                        android:src="@drawable/ic_music" />
+
+                    <ImageView
+                        android:id="@+id/coverMusic"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:contentDescription="@null"
+                        android:scaleType="centerCrop"
+                        android:visibility="gone" />
+
+                    <com.minimal.carlauncher.ui.view.EqualizerView
+                        android:id="@+id/eqMusic"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:padding="4dp"
+                        android:visibility="gone" />
+                </FrameLayout>
 
                 <TextView
                     android:id="@+id/titleMusic"
@@ -688,6 +711,50 @@
                     android:text="@string/card_not_set"
                     android:textColor="@color/cockpit_text_dim"
                     android:textSize="@dimen/card_sub_text" />
+
+                <!-- Previous / play-pause / next, shown while a player is active. -->
+                <LinearLayout
+                    android:id="@+id/musicControls"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:gravity="center"
+                    android:orientation="horizontal"
+                    android:visibility="gone">
+
+                    <ImageButton
+                        android:id="@+id/btnMusicPrev"
+                        android:layout_width="40dp"
+                        android:layout_height="36dp"
+                        android:background="@drawable/bg_dock_item"
+                        android:contentDescription="@string/media_previous"
+                        android:padding="7dp"
+                        android:scaleType="fitCenter"
+                        android:src="@drawable/ic_media_prev"
+                        android:tint="@color/cockpit_text_secondary" />
+
+                    <ImageButton
+                        android:id="@+id/btnMusicPlay"
+                        android:layout_width="44dp"
+                        android:layout_height="36dp"
+                        android:background="@drawable/bg_dock_item"
+                        android:contentDescription="@string/media_play_pause"
+                        android:padding="5dp"
+                        android:scaleType="fitCenter"
+                        android:src="@drawable/ic_media_pause"
+                        android:tint="@color/cockpit_accent" />
+
+                    <ImageButton
+                        android:id="@+id/btnMusicNext"
+                        android:layout_width="40dp"
+                        android:layout_height="36dp"
+                        android:background="@drawable/bg_dock_item"
+                        android:contentDescription="@string/media_next"
+                        android:padding="7dp"
+                        android:scaleType="fitCenter"
+                        android:src="@drawable/ic_media_next"
+                        android:tint="@color/cockpit_text_secondary" />
+                </LinearLayout>
             </LinearLayout>
         </LinearLayout>
 

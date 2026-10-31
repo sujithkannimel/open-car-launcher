@@ -85,10 +85,13 @@ class RadioWidgetController(
             !state.sessionAccess -> {
                 binding.textRadioStatus.visibility = View.VISIBLE
                 binding.textRadioStatus.setText(R.string.radio_grant_access)
+                // A real call to action keeps the warning colour; "not playing" is just status.
+                binding.textRadioStatus.setTextColor(androidx.core.content.ContextCompat.getColor(activity, R.color.cockpit_warn))
             }
             !state.connected -> {
                 binding.textRadioStatus.visibility = View.VISIBLE
                 binding.textRadioStatus.setText(R.string.radio_not_playing)
+                binding.textRadioStatus.setTextColor(androidx.core.content.ContextCompat.getColor(activity, R.color.cockpit_text_dim))
             }
             else -> binding.textRadioStatus.visibility = View.GONE
         }

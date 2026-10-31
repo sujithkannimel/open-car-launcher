@@ -71,6 +71,10 @@ enum class TuneResult {
  */
 class RadioRepository(context: Context) {
 
+    private companion object {
+        val MUSIC_HINTS = listOf("music", "youtube", "zlink", "zjinnova", "spotify", "tune", "player", "podcast", "audible")
+    }
+
     private val appContext = context.applicationContext
     private val main = Handler(Looper.getMainLooper())
     private val sessionManager = appContext.getSystemService(MediaSessionManager::class.java)
@@ -171,6 +175,7 @@ class RadioRepository(context: Context) {
         val chosen = Prefs.radioPackage
         if (chosen != null) return sbn.packageName == chosen
         if (RadioFrequency.looksLikeRadioPackage(sbn.packageName)) return true
+        if (looksLikeMusicPlayer(sbn.packageName)) return false
         return sbn.isOngoing &&
             RadioMetadata.extract(NotificationText.fromExtras(sbn.notification)).frequency != null
     }
@@ -265,7 +270,18 @@ class RadioRepository(context: Context) {
         }
         sessions.firstOrNull { RadioFrequency.looksLikeRadioPackage(it.packageName) }
             ?.let { return it }
-        return sessions.firstOrNull { RadioMetadata.extract(fieldsOf(it.metadata)).frequency != null }
+        return sessions.firstOrNull {
+            !looksLikeMusicPlayer(it.packageName) && RadioMetadata.extract(fieldsOf(it.metadata)).frequency != null
+        }
+    }
+
+    /**
+     * Music apps are never the tuner, even when a song title happens to read like a
+     * frequency (that once put a YouTube Music build on the radio card).
+     */
+    private fun looksLikeMusicPlayer(pkg: String): Boolean {
+        val p = pkg.lowercase()
+        return MUSIC_HINTS.any { it in p }
     }
 
     private fun attach(next: MediaController?) {

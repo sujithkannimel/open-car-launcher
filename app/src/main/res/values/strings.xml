@@ -55,6 +55,13 @@
     <string name="radio_seek_up">Seek up. Long-press to step up</string>
     <string name="radio_grant_access">Tap to sync with the car radio</string>
     <string name="radio_not_playing">Radio not playing</string>
+    <string name="media_previous">Previous track</string>
+    <string name="media_play_pause">Play or pause</string>
+    <string name="media_next">Next track</string>
+    <string name="music_playing">Playing</string>
+    <string name="music_paused">Paused</string>
+    <string name="link_connected">%1$s connected</string>
+    <string name="link_found">Phone found…</string>
     <string name="radio_preset_empty">+</string>
     <string name="radio_preset_desc">Preset %1$d, %2$s. Long-press to replace</string>
     <string name="radio_preset_empty_desc">Empty preset %1$d. Long-press to save the current station</string>
