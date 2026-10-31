@@ -679,6 +679,7 @@
                     <!-- Navigation pill: tap opens the nav app, long-press chooses it. -->
                     <LinearLayout
                         android:id="@+id/cardNav"
+                        android:visibility="gone"
                         android:layout_width="wrap_content"
                         android:layout_height="40dp"
                         android:layout_marginStart="6dp"
@@ -725,16 +726,14 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_gravity="center_horizontal"
-                    android:background="@drawable/bg_controls"
                     android:gravity="center"
                     android:orientation="horizontal"
-                    android:padding="4dp"
                     android:visibility="gone">
 
                     <ImageButton
                         android:id="@+id/btnMusicPrev"
-                        android:layout_width="52dp"
-                        android:layout_height="52dp"
+                        android:layout_width="48dp"
+                        android:layout_height="44dp"
                         android:background="@drawable/bg_dock_item"
                         android:contentDescription="@string/media_previous"
                         android:padding="10dp"
@@ -744,10 +743,10 @@
 
                     <ImageButton
                         android:id="@+id/btnMusicPlay"
-                        android:layout_width="56dp"
-                        android:layout_height="56dp"
-                        android:layout_marginStart="14dp"
-                        android:layout_marginEnd="14dp"
+                        android:layout_width="50dp"
+                        android:layout_height="50dp"
+                        android:layout_marginStart="18dp"
+                        android:layout_marginEnd="18dp"
                         android:background="@drawable/bg_play_neon"
                         android:contentDescription="@string/media_play_pause"
                         android:padding="12dp"
@@ -757,8 +756,8 @@
 
                     <ImageButton
                         android:id="@+id/btnMusicNext"
-                        android:layout_width="52dp"
-                        android:layout_height="52dp"
+                        android:layout_width="48dp"
+                        android:layout_height="44dp"
                         android:background="@drawable/bg_dock_item"
                         android:contentDescription="@string/media_next"
                         android:padding="10dp"
