@@ -325,7 +325,7 @@ class RadioRepository(context: Context) {
         if (readout.frequency != null && readout.frequency.encode() != Prefs.radioLastFrequency) {
             Prefs.radioLastFrequency = readout.frequency.encode()
         }
-        val name = readout.stationName.orEmpty()
+        val name = readout.stationName.orEmpty().takeUnless { looksLikePackageName(it) }.orEmpty()
         if (name != Prefs.radioLastStation) Prefs.radioLastStation = name
     }
 
@@ -340,10 +340,26 @@ class RadioRepository(context: Context) {
         )
 
     /** Shows the last station instantly at ignition, before the tuner republishes anything. */
-    private fun rememberedState() = RadioState(
-        frequency = RadioFrequency.decode(Prefs.radioLastFrequency),
-        stationName = Prefs.radioLastStation.ifBlank { null }
-    )
+    /**
+     * Last station from prefs, minus values a non-tuner app left behind: a package name as the
+     * station ("app.revanced.android...") or an FM frequency off the 50 kHz grid ("100.67").
+     */
+    private fun rememberedState(): RadioState {
+        var freq = RadioFrequency.decode(Prefs.radioLastFrequency)
+        if (freq != null && freq.band == RadioFrequency.Band.FM && freq.khz % 50 != 0) {
+            freq = null
+            Prefs.radioLastFrequency = ""
+        }
+        var name = Prefs.radioLastStation.ifBlank { null }
+        if (name != null && looksLikePackageName(name)) {
+            name = null
+            Prefs.radioLastStation = ""
+        }
+        return RadioState(frequency = freq, stationName = name)
+    }
+
+    private fun looksLikePackageName(s: String) =
+        ' ' !in s.trim() && s.count { it == '.' } >= 2 && s.firstOrNull()?.isLowerCase() == true
 
     // ------------------------------------------------------------- diagnostics
 
