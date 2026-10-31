@@ -6,9 +6,9 @@
 -->
 <resources>
     <color name="cockpit_bg">#FF0C0D0F</color>
-    <color name="cockpit_surface">#FF17181B</color>
+    <color name="cockpit_surface">#FF1B1D21</color>
     <color name="cockpit_surface_alt">#FF222429</color>
-    <color name="cockpit_divider">#1FFFFFFF</color>
+    <color name="cockpit_divider">#29FFFFFF</color>
 
     <color name="cockpit_text_primary">#FFF3F4F6</color>
     <color name="cockpit_text_secondary">#FFC4C8CE</color>

@@ -27,7 +27,7 @@ class EqualizerView @JvmOverloads constructor(
         set(v) { if (field != v) { field = v; invalidate() } }
 
     private val pitch = 14f * resources.displayMetrics.density
-    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { alpha = 120 }
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { alpha = 95 }
     private val glow = Paint(Paint.ANTI_ALIAS_FLAG).apply { alpha = 35 }
     private var shaderFor = 0
 
@@ -48,7 +48,7 @@ class EqualizerView @JvmOverloads constructor(
             val level = if (playing) {
                 // Two sines per bar at different speeds look more like music than one.
                 (0.12 + 0.8 * abs(sin(t * (1.7 + i * 0.13) + i) * 0.6 + sin(t * 2.9 + i * 0.7) * 0.4))
-                    .coerceIn(0.08, 0.92)
+                    .coerceIn(0.08, 0.8)
             } else 0.07 + 0.03 * (i % 3)
             val bh = (h * level).toFloat()
             val x = i * (bw + gap)

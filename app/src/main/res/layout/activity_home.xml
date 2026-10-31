@@ -612,9 +612,9 @@
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
                 android:layout_marginStart="10dp"
-                android:layout_marginTop="34dp"
+                android:layout_marginTop="44dp"
                 android:layout_marginEnd="10dp"
-                android:layout_marginBottom="8dp" />
+                android:layout_marginBottom="10dp" />
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -680,7 +680,7 @@
                     <LinearLayout
                         android:id="@+id/cardNav"
                         android:layout_width="wrap_content"
-                        android:layout_height="34dp"
+                        android:layout_height="40dp"
                         android:layout_marginStart="6dp"
                         android:background="@drawable/bg_pill"
                         android:clickable="true"
@@ -692,8 +692,8 @@
 
                         <ImageView
                             android:id="@+id/iconNav"
-                            android:layout_width="18dp"
-                            android:layout_height="18dp"
+                            android:layout_width="20dp"
+                            android:layout_height="20dp"
                             android:contentDescription="@null"
                             android:src="@drawable/ic_navigation" />
 
@@ -704,7 +704,7 @@
                             android:layout_marginStart="6dp"
                             android:text="@string/card_navigation"
                             android:textColor="@color/cockpit_text_primary"
-                            android:textSize="13sp" />
+                            android:textSize="15sp" />
 
                         <TextView
                             android:id="@+id/subtitleNav"
@@ -722,16 +722,19 @@
                 <!-- Previous / play-pause / next, shown while a player is active. -->
                 <LinearLayout
                     android:id="@+id/musicControls"
-                    android:layout_width="match_parent"
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
+                    android:layout_gravity="center_horizontal"
+                    android:background="@drawable/bg_controls"
                     android:gravity="center"
                     android:orientation="horizontal"
+                    android:padding="4dp"
                     android:visibility="gone">
 
                     <ImageButton
                         android:id="@+id/btnMusicPrev"
-                        android:layout_width="48dp"
-                        android:layout_height="44dp"
+                        android:layout_width="52dp"
+                        android:layout_height="52dp"
                         android:background="@drawable/bg_dock_item"
                         android:contentDescription="@string/media_previous"
                         android:padding="10dp"
@@ -741,10 +744,10 @@
 
                     <ImageButton
                         android:id="@+id/btnMusicPlay"
-                        android:layout_width="48dp"
-                        android:layout_height="48dp"
-                        android:layout_marginStart="18dp"
-                        android:layout_marginEnd="18dp"
+                        android:layout_width="56dp"
+                        android:layout_height="56dp"
+                        android:layout_marginStart="14dp"
+                        android:layout_marginEnd="14dp"
                         android:background="@drawable/bg_play_neon"
                         android:contentDescription="@string/media_play_pause"
                         android:padding="12dp"
@@ -754,8 +757,8 @@
 
                     <ImageButton
                         android:id="@+id/btnMusicNext"
-                        android:layout_width="48dp"
-                        android:layout_height="44dp"
+                        android:layout_width="52dp"
+                        android:layout_height="52dp"
                         android:background="@drawable/bg_dock_item"
                         android:contentDescription="@string/media_next"
                         android:padding="10dp"
