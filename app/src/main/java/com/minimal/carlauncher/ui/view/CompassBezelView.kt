@@ -1,14 +1,17 @@
 package com.minimal.carlauncher.ui.view
 
+import android.animation.ValueAnimator
 import android.content.Context
+import android.graphics.BlurMaskFilter
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
-import android.graphics.SweepGradient
-import android.graphics.Typeface
+import android.graphics.Path
 import android.util.AttributeSet
 import android.view.View
+import android.view.animation.DecelerateInterpolator
 import androidx.core.content.ContextCompat
+import androidx.core.content.res.ResourcesCompat
 import com.minimal.carlauncher.R
 import com.minimal.carlauncher.core.Neon
 import kotlin.math.abs
@@ -17,11 +20,13 @@ import kotlin.math.min
 import kotlin.math.sin
 
 /**
- * The ring around the map portal: tick marks plus N / E / S / W.
+ * The ring around the map portal, drawn as a sports-car rev counter for the speed:
+ * 40 slanted segments over 270 degrees (0 at bottom-left, 160 km/h at bottom-right) that
+ * light up with the speed in zones - cyan to 60, violet to 100, pink to 120, red above -
+ * with white ticks and labels at 0 / 40 / 60 / 100 / 120 / 160.
  *
- * [northDeg] is where north currently sits on screen, clockwise from the top - the same
- * number osmdroid uses as its map orientation, so the bezel and the map always agree.
- * Letters are drawn upright at their rotated positions, so they stay readable at any heading.
+ * A small cyan pointer on the inner edge still shows where north is ([northDeg], the same
+ * number osmdroid uses as its map orientation).
  */
 class CompassBezelView @JvmOverloads constructor(
     context: Context,
@@ -31,109 +36,129 @@ class CompassBezelView @JvmOverloads constructor(
 
     var northDeg: Float = 0f
         set(value) {
-            // Sub-degree changes are invisible on the ring; skipping them saves redraws.
             if (abs(value - field) < 0.5f) return
             field = value
             invalidate()
         }
 
+    /** Shown speed in km/h (animates toward [setSpeed]'s target). */
+    private var shownKmh = 0f
+    private var target = 0f
+    private var anim: ValueAnimator? = null
+
+    /** New speed from GPS (km/h); the arc sweeps to it smoothly. */
+    fun setSpeed(kmh: Float) {
+        val t = kmh.coerceIn(0f, MAX_KMH)
+        if (abs(t - target) < 0.3f) return
+        target = t
+        anim?.cancel()
+        anim = ValueAnimator.ofFloat(shownKmh, t).apply {
+            duration = 650L
+            interpolator = DecelerateInterpolator()
+            addUpdateListener { shownKmh = it.animatedValue as Float; invalidate() }
+            start()
+        }
+    }
+
     private val density = resources.displayMetrics.density
+    private val bezelWidth = resources.getDimension(R.dimen.map_bezel_width)
+    private val font = try { ResourcesCompat.getFont(context, R.font.audiowide) } catch (_: Exception) { null }
 
     private val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
         color = ContextCompat.getColor(context, R.color.cockpit_surface)
     }
-    private val edgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeWidth = 1.5f * density
-        color = ContextCompat.getColor(context, R.color.cockpit_divider)
+    private val offPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(0x26, 0x28, 0x2D) }
+    private val onPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        maskFilter = BlurMaskFilter(5f * density, BlurMaskFilter.Blur.NORMAL)
     }
-    private val minorTick = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        strokeWidth = 1.5f * density
-        strokeCap = Paint.Cap.ROUND
-        color = ContextCompat.getColor(context, R.color.cockpit_text_dim)
+    private val tickPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Neon.TEXT; strokeWidth = 2f * density; strokeCap = Paint.Cap.ROUND
     }
-    private val majorTick = Paint(minorTick).apply {
-        strokeWidth = 3f * density
-        color = ContextCompat.getColor(context, R.color.cockpit_text_secondary)
-    }
-    private val letterPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textAlign = Paint.Align.CENTER
-        typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-        color = ContextCompat.getColor(context, R.color.cockpit_text_primary)
+        typeface = font
+        color = Neon.TEXT_2
     }
-    private val northPaint = Paint(letterPaint).apply {
-        color = ContextCompat.getColor(context, R.color.cockpit_accent)
+    private val northPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Neon.CYAN
+        setShadowLayer(4f * density, 0f, 0f, Neon.CYAN)
     }
+    private val seg = Path()
+    private val tri = Path()
 
-    /** Dark theme only: a neon rim (cyan -> violet -> pink -> cyan) around the outside. */
-    private val neon = (resources.configuration.uiMode and
-        android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
-    private val rimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeWidth = 3f * density
-        color = Color.WHITE
-        setShadowLayer(8f * density, 0f, 0f, Neon.alpha(Neon.VIOLET, 190))
-    }
-    private val rimGlow = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeWidth = 9f * density
-        color = Color.WHITE
-        alpha = 55
-    }
-    private var rimFor = -1f
-
-    /** Ring thickness; the map is inset by exactly this in the layout. */
-    private val bezelWidth = resources.getDimension(R.dimen.map_bezel_width)
+    init { setLayerType(LAYER_TYPE_SOFTWARE, null) }   // blur and shadow need it
 
     override fun onDraw(canvas: Canvas) {
         val cx = width / 2f
         val cy = height / 2f
         val outer = min(cx, cy)
         val inner = outer - bezelWidth
-        val mid = (outer + inner) / 2f
-
         canvas.drawCircle(cx, cy, outer, ringPaint)
-        if (neon) {
-            if (rimFor != cx + cy) {
-                rimFor = cx + cy
-                val sweep = SweepGradient(cx, cy, intArrayOf(Neon.CYAN, Neon.VIOLET, Neon.PINK, Neon.CYAN), null)
-                rimPaint.shader = sweep; rimGlow.shader = sweep
-            }
-            val r = outer - rimPaint.strokeWidth / 2f - 3f * density
-            canvas.drawCircle(cx, cy, r, rimGlow)
-            canvas.drawCircle(cx, cy, r, rimPaint)
-        } else {
-            canvas.drawCircle(cx, cy, outer - edgePaint.strokeWidth / 2f, edgePaint)
+
+        // Arc in the outer part of the ring, labels in the inner part.
+        val pad = 2.5f * density
+        val r1 = outer - pad
+        val r0 = r1 - bezelWidth * 0.40f
+        val lit = Math.round(shownKmh / MAX_KMH * SEGMENTS)
+        for (i in 0 until SEGMENTS) {
+            val a0 = angle(i * MAX_KMH / SEGMENTS)
+            val a1 = angle((i + 0.72f) * MAX_KMH / SEGMENTS)
+            seg.reset()
+            seg.moveTo(px(cx, r1, a0), py(cy, r1, a0))
+            seg.lineTo(px(cx, r1, a1), py(cy, r1, a1))
+            seg.lineTo(px(cx, r0, a1), py(cy, r0, a1))
+            seg.lineTo(px(cx, r0, a0), py(cy, r0, a0))
+            seg.close()
+            if (i < lit) {
+                val c = zone((i + 0.5f) * MAX_KMH / SEGMENTS)
+                glowPaint.color = Neon.alpha(c, 170)
+                onPaint.color = c
+                canvas.drawPath(seg, glowPaint)
+                canvas.drawPath(seg, onPaint)
+            } else canvas.drawPath(seg, offPaint)
         }
 
-        // Ticks every 10 degrees, but the cardinal positions are left for the letters.
-        for (deg in 0 until 360 step 10) {
-            if (deg % 90 == 0) continue
-            val major = deg % 30 == 0
-            val len = if (major) bezelWidth * 0.34f else bezelWidth * 0.2f
-            val a = Math.toRadians((deg + northDeg).toDouble())
-            val s = sin(a).toFloat()
-            val c = cos(a).toFloat()
-            canvas.drawLine(
-                cx + (mid - len / 2f) * s, cy - (mid - len / 2f) * c,
-                cx + (mid + len / 2f) * s, cy - (mid + len / 2f) * c,
-                if (major) majorTick else minorTick
-            )
+        labelPaint.textSize = bezelWidth * 0.30f
+        val labelR = r0 - bezelWidth * 0.26f
+        val shift = -(labelPaint.ascent() + labelPaint.descent()) / 2f
+        for (v in MARKS) {
+            val a = angle(v)
+            canvas.drawLine(px(cx, r1 + pad * 0.6f, a), py(cy, r1 + pad * 0.6f, a),
+                px(cx, r0 - 2f * density, a), py(cy, r0 - 2f * density, a), tickPaint)
+            labelPaint.color = if (v >= 120f) Neon.RED else Neon.TEXT_2
+            canvas.drawText(v.toInt().toString(), px(cx, labelR, a), py(cy, labelR, a) + shift, labelPaint)
         }
 
-        letterPaint.textSize = bezelWidth * 0.55f
-        northPaint.textSize = bezelWidth * 0.62f
-        val baselineShift = -(letterPaint.ascent() + letterPaint.descent()) / 2f
-        LETTERS.forEachIndexed { i, letter ->
-            val a = Math.toRadians((i * 90f + northDeg).toDouble())
-            val x = cx + mid * sin(a).toFloat()
-            val y = cy - mid * cos(a).toFloat() + baselineShift
-            canvas.drawText(letter, x, y, if (i == 0) northPaint else letterPaint)
-        }
+        // North pointer: a small triangle on the inner edge of the ring.
+        val na = Math.toRadians((northDeg - 90f).toDouble()).toFloat()
+        val tip = inner + 1f * density
+        val base = inner + bezelWidth * 0.22f
+        val half = 0.07f
+        tri.reset()
+        tri.moveTo(px(cx, tip, na), py(cy, tip, na))
+        tri.lineTo(px(cx, base, na - half), py(cy, base, na - half))
+        tri.lineTo(px(cx, base, na + half), py(cy, base, na + half))
+        tri.close()
+        canvas.drawPath(tri, northPaint)
+    }
+
+    /** Screen angle (radians, 0 = 3 o'clock, clockwise) for a speed on the 270 degree arc. */
+    private fun angle(kmh: Float): Float = Math.toRadians(135.0 + kmh / MAX_KMH * 270.0).toFloat()
+    private fun px(cx: Float, r: Float, a: Float) = cx + r * cos(a)
+    private fun py(cy: Float, r: Float, a: Float) = cy + r * sin(a)
+
+    private fun zone(kmh: Float): Int = when {
+        kmh < 60f -> Neon.CYAN
+        kmh < 100f -> Neon.VIOLET
+        kmh < 120f -> Neon.PINK
+        else -> Neon.RED
     }
 
     private companion object {
-        val LETTERS = arrayOf("N", "E", "S", "W")
+        const val MAX_KMH = 160f
+        const val SEGMENTS = 40
+        val MARKS = floatArrayOf(0f, 40f, 60f, 100f, 120f, 160f)
     }
 }

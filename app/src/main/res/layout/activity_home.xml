@@ -165,10 +165,9 @@
                         style="@style/Text.Gauge"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:fontFamily="sans-serif-condensed"
+                        android:fontFamily="@font/exo2_black_italic"
                         android:text="@string/speed_placeholder"
                         android:textColor="#FFF3F4F6"
-                        android:textStyle="bold|italic"
                         android:textSize="@dimen/speed_text"
                         tools:text="62" />
 
@@ -181,7 +180,7 @@
                         android:text="@string/unit_kmh"
                         android:textAllCaps="true"
                         android:textColor="#FFF472B6"
-                        android:textStyle="bold|italic"
+                        android:fontFamily="@font/audiowide"
                         android:textSize="@dimen/speed_unit_text" />
                 </LinearLayout>
 
@@ -344,8 +343,7 @@
                     android:layout_height="wrap_content"
                     android:format12Hour="h:mm"
                     android:format24Hour="HH:mm"
-                    android:fontFamily="sans-serif-condensed"
-                    android:textStyle="bold|italic"
+                    android:fontFamily="@font/audiowide"
                     android:textSize="@dimen/clock_text"
                     tools:text="12:47" />
 
@@ -357,8 +355,7 @@
                     android:layout_marginStart="4dp"
                     android:format12Hour="ss"
                     android:format24Hour="ss"
-                    android:fontFamily="sans-serif-condensed"
-                    android:textStyle="bold|italic"
+                    android:fontFamily="@font/audiowide"
                     android:textColor="#FF8B5CF6"
                     android:textSize="@dimen/clock_seconds_text"
                     tools:text="09" />
@@ -380,7 +377,7 @@
                 android:format24Hour="EEEE"
                 android:letterSpacing="0.18"
                 android:textAllCaps="true"
-                android:textStyle="bold|italic"
+                android:fontFamily="@font/audiowide"
                 android:textColor="@color/cockpit_text_secondary"
                 android:textSize="@dimen/date_text"
                 tools:text="TUESDAY" />
@@ -392,9 +389,9 @@
                 android:layout_height="wrap_content"
                 android:format12Hour="d MMM yyyy"
                 android:format24Hour="d MMM yyyy"
+                android:fontFamily="@font/audiowide"
                 android:letterSpacing="0.12"
                 android:textAllCaps="true"
-                android:textStyle="italic"
                 android:textSize="@dimen/date_text"
                 tools:text="16 September 2026" />
         </LinearLayout>

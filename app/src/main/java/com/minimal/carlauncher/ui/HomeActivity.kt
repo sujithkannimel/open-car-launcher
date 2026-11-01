@@ -262,34 +262,40 @@ class HomeActivity : AppCompatActivity() {
 
     /** Racing look: forward-leaning digits, neon seconds, glowing speed, segment bars. */
     private fun styleSporty() {
-        val lean = -0.18f
-        listOf(binding.clockTime, binding.clockSeconds, binding.textSpeed, binding.textSpeedUnit)
-            .forEach { it.paint.textSkewX = lean; it.setPadding(it.paddingLeft, it.paddingTop, it.paddingRight + 8, it.paddingBottom) }
-        binding.clockTime.setShadowLayer(14f, 0f, 0f, com.minimal.carlauncher.core.Neon.alpha(com.minimal.carlauncher.core.Neon.CYAN, 110))
-        binding.textSpeed.setShadowLayer(18f, 0f, 0f, com.minimal.carlauncher.core.Neon.alpha(com.minimal.carlauncher.core.Neon.PINK, 170))
-        // Seconds in the neon gradient once their width is known.
-        binding.clockSeconds.addOnLayoutChangeListener { v, l, t, r, b, _, _, _, _ ->
-            val tv = v as android.widget.TextView
-            tv.paint.shader = android.graphics.LinearGradient(0f, 0f, (r - l).toFloat(), (b - t).toFloat(),
-                com.minimal.carlauncher.core.Neon.GRADIENT, null, android.graphics.Shader.TileMode.CLAMP)
-        }
-        binding.secondsBar.segments = 30
-        binding.speedBar.segments = 16
-        binding.clockSeconds.addTextChangedListener(object : android.text.TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
-            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
-            override fun afterTextChanged(e: android.text.Editable?) {
-                val sec = e?.toString()?.toIntOrNull() ?: return
-                binding.secondsBar.level = (sec + 1) / 60f
+        val N = com.minimal.carlauncher.core.Neon
+        val audiowide = try { androidx.core.content.res.ResourcesCompat.getFont(this, R.font.audiowide) } catch (_: Exception) { null }
+        val exo = try { androidx.core.content.res.ResourcesCompat.getFont(this, R.font.exo2_black_italic) } catch (_: Exception) { null }
+        /** Neon gradient (cyan, violet, pink) across the text, with a soft violet glow. */
+        fun neon(tv: android.widget.TextView, face: android.graphics.Typeface?, glow: Float) {
+            face?.let { tv.setTypeface(it, android.graphics.Typeface.NORMAL) }
+            tv.paint.textSkewX = 0f
+            tv.setShadowLayer(glow, 0f, 0f, N.alpha(N.VIOLET, 150))
+            tv.addOnLayoutChangeListener { v, l, _, r, _, _, _, _, _ ->
+                (v as android.widget.TextView).paint.shader = android.graphics.LinearGradient(
+                    0f, 0f, (r - l).toFloat().coerceAtLeast(1f), 0f, N.GRADIENT, null, android.graphics.Shader.TileMode.CLAMP)
+                v.invalidate()
             }
-        })
+        }
+        neon(binding.clockTime, audiowide, 14f)
+        neon(binding.clockSeconds, audiowide, 8f)
+        neon(binding.clockDay, audiowide, 6f)
+        neon(binding.clockDate, audiowide, 6f)
+        // Exo 2 Black Italic carries digits only; dashes fall back cleanly.
+        neon(binding.textSpeed, exo, 20f)
+        neon(binding.textSpeedUnit, audiowide, 6f)
+        binding.textSpeed.setPadding(binding.textSpeed.paddingLeft, 0, binding.textSpeed.paddingRight + 10, 0)
+        // The rev-counter arc round the map replaces the small bars.
+        binding.secondsBar.visibility = View.GONE
+        binding.speedBar.visibility = View.GONE
     }
 
     private fun render(state: VehicleState) {
         val unit = viewModel.speedUnit.value
 
         binding.textSpeed.text = Format.speedText(unit, state.speedMps, state.hasFix)
-        binding.speedBar.level = if (state.hasFix) state.speedMps * 3.6f / 160f else 0f
+        binding.compassBezel.setSpeed(
+            if (!state.hasFix || state.speedMps < com.minimal.carlauncher.core.Constants.SPEED_NOISE_GATE_MPS) 0f
+            else state.speedMps * 3.6f)
         binding.textSpeedUnit.text = Format.unitLabel(unit)
         if (android.os.SystemClock.elapsedRealtime() >= perfShownUntil) binding.textSpeedStatus.setText(
             when {
