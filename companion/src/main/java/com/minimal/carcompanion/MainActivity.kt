@@ -171,11 +171,48 @@ class MainActivity : Activity() {
         }
         setContentView(root)
 
-        // Cached data first, so the app opens instantly even offline.
-        prefs.getString("cache", null)?.let { data = CarData.parse(it, prefs.getString("cacheName", "") ?: "") }
+        // Cached data first (cloud or live from the car), so the app opens instantly offline.
+        data = LinkStore.cached(this)?.let { withAllPending(it, emptyList()) }
         select(TAB_HOME)
         if (token.isEmpty()) settings() else refresh()
         checkForUpdate()
+        LinkService.start(this)
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED &&
+            !prefs.getBoolean("askedNotif", false)) {
+            prefs.edit().putBoolean("askedNotif", true).apply()
+            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 5)
+        }
+    }
+
+    private var cloudPending: List<com.minimal.carlauncher.core.InboxFill> = emptyList()
+
+    /** Pending fill-ups: those in the cloud inbox plus those kept on this phone for the live link. */
+    private fun withAllPending(d: CarData, cloud: List<com.minimal.carlauncher.core.InboxFill>): CarData {
+        cloudPending = cloud
+        val all = (cloud + LinkStore.localFills(this)).distinctBy { it.id }
+        return d.withPending(all, d.fuelEvents)
+    }
+
+    private val liveListener: () -> Unit = {
+        runOnUiThread {
+            LinkStore.cached(this)?.let { data = withAllPending(it, cloudPending); render() }
+        }
+    }
+    private val ticker = object : Runnable {
+        override fun run() { if (data?.live == true) render(); subtitle.postDelayed(this, 15_000) }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        LinkStore.addListener(liveListener)
+        subtitle.postDelayed(ticker, 15_000)
+    }
+
+    override fun onPause() {
+        LinkStore.removeListener(liveListener)
+        subtitle.removeCallbacks(ticker)
+        super.onPause()
     }
 
     private val myVersion: String by lazy {
@@ -236,8 +273,10 @@ class MainActivity : Activity() {
         subtitle.text = when {
             loading -> "Updating..."
             d == null -> "No data yet"
+            d.live -> liveLabel(LinkStore.liveAt(this))
             else -> "Car data from " + dayFmt.format(Date(d.createdMs)) + ", " + timeFmt.format(Date(d.createdMs))
         }
+        subtitle.setTextColor(if (d?.live == true && System.currentTimeMillis() - LinkStore.liveAt(this) < 120_000) GREEN else DIM)
         if (loading) spin?.start() ?: run {
             spin = ObjectAnimator.ofFloat(refreshIcon, View.ROTATION, 0f, 360f).apply {
                 duration = 900; repeatCount = ValueAnimator.INFINITE; interpolator = LinearInterpolator(); start()
@@ -491,11 +530,18 @@ class MainActivity : Activity() {
         Thread {
             val res = CarCloud.fetch(r, t, p)
             val pending = if (res.data != null) CarCloud.pendingFills(r, t) else emptyList()
+            CarCloud.fetchLinkKey(r, t, p)?.let { k ->
+                if (k != LinkStore.key(this)) { LinkStore.setKey(this, k); LinkService.stop(this) }
+            }
             runOnUiThread {
                 loading = false
-                if (res.data != null && res.rawText != null) {
-                    data = res.data.withPending(pending, res.data.fuelEvents)
+                LinkService.start(this)
+                val liveData = LinkStore.cached(this)?.takeIf { it.live }
+                if (res.data != null && res.rawText != null && (liveData == null || res.data.createdMs > liveData.createdMs)) {
+                    data = withAllPending(res.data, pending)
                     prefs.edit().putString("cache", res.rawText).putString("cacheName", res.data.sourceName).apply()
+                } else if (liveData != null) {
+                    data = withAllPending(liveData, pending)   // what the car sent directly is newer
                 } else {
                     Toast.makeText(this, res.error ?: "Couldn't load", Toast.LENGTH_LONG).show()
                 }
@@ -522,6 +568,14 @@ class MainActivity : Activity() {
             setTextColor(CYAN); textSize = 14f; setPadding(0, px(16), 0, px(8))
             setOnClickListener { checkForUpdate(force = true) }
         })
+        val linkBox = android.widget.CheckBox(this).apply {
+            text = "Live link with the car (no internet needed)"
+            isChecked = LinkStore.enabled(this@MainActivity)
+            setTextColor(TEXT)
+        }
+        col.addView(linkBox)
+        col.addView(small(if (LinkStore.key(this) == null) "Waiting for the car to share its link key (needs the car online once)."
+            else "Ready. The car sends data straight to this phone on home Wi-Fi and during Android Auto."))
         AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
             .setTitle("Connect to your car's backups")
             .setView(col)
@@ -529,10 +583,12 @@ class MainActivity : Activity() {
                 repoName = repo.text.toString()
                 tok.text.toString().trim().takeIf { it.isNotEmpty() }?.let { token = it }
                 passphrase = pass.text.toString()
+                LinkStore.setEnabled(this, linkBox.isChecked)
+                if (linkBox.isChecked) LinkService.start(this) else LinkService.stop(this)
                 refresh()
             }
             .setNeutralButton("Forget") { _, _ ->
-                prefs.edit().clear().apply(); data = null; render()
+                LinkService.stop(this); prefs.edit().clear().apply(); data = null; render()
             }
             .setNegativeButton("Cancel", null)
             .show()
@@ -572,18 +628,18 @@ class MainActivity : Activity() {
                 val fill = com.minimal.carlauncher.core.InboxFill(
                     java.util.UUID.randomUUID().toString().replace("-", "").take(12),
                     System.currentTimeMillis(), full, l ?: -1f, o)
+                // Kept on the phone for the live link, and put in the cloud inbox as a backup route.
+                LinkStore.addLocalFill(this, fill)
+                data = data?.let { withAllPending(it, cloudPending) }
+                render()
                 Toast.makeText(this, "Saving...", Toast.LENGTH_SHORT).show()
                 val r = repoName; val t = token
                 Thread {
                     val err = CarCloud.putFill(r, t, fill)
                     runOnUiThread {
-                        if (err == null) {
-                            Toast.makeText(this, "Saved. The car adds it next time it's online.", Toast.LENGTH_LONG).show()
-                            refresh()
-                        } else {
-                            AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                                .setTitle("Not saved").setMessage(err).setPositiveButton("OK", null).show()
-                        }
+                        Toast.makeText(this, if (err == null) "Saved. The car adds it within a minute when you're in it, or when it's next online."
+                            else "Saved on the phone. The car picks it up directly when you're in it.", Toast.LENGTH_LONG).show()
+                        if (err == null) refresh()
                     }
                 }.start()
             }
@@ -755,6 +811,15 @@ class MainActivity : Activity() {
 
     private fun dayLabel(day: String) =
         BatteryHealth.dayNumber(day)?.let { shortDay.format(Date(it * 86_400_000L)) } ?: day
+
+    private fun liveLabel(at: Long): String {
+        val s = ((System.currentTimeMillis() - at) / 1000).coerceAtLeast(0)
+        return "Live from car \u00B7 " + when {
+            s < 60 -> "just now"
+            s < 3600 -> "${s / 60} min ago"
+            else -> timeFmt.format(Date(at))
+        }
+    }
 
     private fun dur(sec: Long): String {
         val m = (sec / 60).coerceAtLeast(0)

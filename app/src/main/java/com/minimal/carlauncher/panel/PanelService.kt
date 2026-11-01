@@ -1533,6 +1533,22 @@ class PanelService : Service() {
         flushTripStats(force = true)
         maybeAutoBackup()
         maybeCloudUpload()
+        liveLinkTick()
+    }
+
+    private var linkWasUp = false
+
+    /** Pushes live data straight to the phone app (no internet needed) and takes its fill-ups. */
+    private fun liveLinkTick() {
+        LiveLink.tick { r ->
+            val up = r.reached != null
+            if (up != linkWasUp) { linkWasUp = up; log(if (up) "live link: phone at ${r.reached}" else "live link: phone not reachable") }
+            if (r.added > 0) handler.post {
+                fuelModelAt = 0L
+                updateFuelDisplay()
+                Toast.makeText(this, "Fill-up from your phone added to the fuel log", Toast.LENGTH_LONG).show()
+            }
+        }
     }
 
     @Volatile private var cloudBusy = false
@@ -1546,7 +1562,7 @@ class PanelService : Service() {
         val latestDue = Prefs.latestKey() != Prefs.cloudLatestKey ||
             System.currentTimeMillis() - Prefs.cloudLatestAt > 60 * 60_000L
         val inboxDue = SystemClock.elapsedRealtime() - lastInboxCheck > 15 * 60_000L || lastInboxCheck == 0L
-        if (dailyDone && !latestDue && !inboxDue) return
+        if (dailyDone && !latestDue && !inboxDue && Prefs.linkKeyUploaded) return
         val now = SystemClock.elapsedRealtime()
         if (lastCloudTry != 0L && now - lastCloudTry < 15 * 60_000L) return
         lastCloudTry = now
@@ -1565,6 +1581,7 @@ class PanelService : Service() {
                         }
                     }
                 }
+                if (com.minimal.carlauncher.core.CloudBackup.uploadLinkKeyIfNeeded()) log("cloud: live-link key shared")
                 if (com.minimal.carlauncher.core.CloudBackup.uploadIfDue()) log("cloud: " + Prefs.cloudStatus)
                 if (com.minimal.carlauncher.core.CloudBackup.uploadLatestIfDue()) log("cloud: latest.json updated")
             } finally {

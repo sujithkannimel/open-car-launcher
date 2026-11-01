@@ -27,6 +27,8 @@ object Backup {
         Prefs.KEY_CLOUD_REPO, Prefs.KEY_CLOUD_TOKEN, Prefs.KEY_CLOUD_PASS,
         Prefs.KEY_CLOUD_LAST_DAY, Prefs.KEY_CLOUD_STATUS,
         Prefs.KEY_CLOUD_LATEST_KEY, Prefs.KEY_CLOUD_LATEST_AT,
+        // Live-link key and state: never in a backup (the key travels only in link.json).
+        Prefs.KEY_LINK_KEY, Prefs.KEY_LINK_UPLOADED, Prefs.KEY_LINK_PHONE,
     )
 
     fun toJson(values: Map<String, *>, createdMs: Long): String {

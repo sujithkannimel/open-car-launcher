@@ -189,6 +189,20 @@ object CloudBackup {
     const val LATEST = "latest.json"
 
     /**
+     * Publishes the live-link key as backups/link.json (encrypted when a passphrase is set) so
+     * the phone app can pick it up once. Background thread only.
+     */
+    fun uploadLinkKeyIfNeeded(): Boolean {
+        if (!Prefs.cloudConfigured || Prefs.linkKeyUploaded) return false
+        val plain = CarLink.linkFile(Prefs.linkKey)
+        val pass = Prefs.cloudPass
+        val body = if (pass.isEmpty()) plain else BackupCrypto.encrypt(plain, pass)
+        val res = upload(Prefs.cloudRepo, Prefs.cloudToken, CarLink.LINK_FILE, body)
+        if (res.ok) Prefs.linkKeyUploaded = true
+        return res.ok
+    }
+
+    /**
      * Keeps backups/latest.json fresh for the phone companion app: uploads when a trip was
      * saved or the fuel log changed, and otherwise at most hourly. Background thread only.
      * Returns true if it uploaded.

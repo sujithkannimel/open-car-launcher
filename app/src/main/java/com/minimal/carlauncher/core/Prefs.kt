@@ -60,6 +60,9 @@ object Prefs {
     const val KEY_CLOUD_STATUS = "pref_cloud_status"
     const val KEY_CLOUD_LATEST_KEY = "pref_cloud_latest_key"
     const val KEY_CLOUD_LATEST_AT = "pref_cloud_latest_at"
+    const val KEY_LINK_KEY = "pref_link_key"
+    const val KEY_LINK_UPLOADED = "pref_link_uploaded"
+    const val KEY_LINK_PHONE = "pref_link_phone"
     const val KEY_TRIP_HISTORY = "pref_trip_history"
     const val KEY_CUR_TRIP_GPS = "pref_cur_trip_gps"
     const val KEY_TRIP_LAST_GPS = "pref_trip_last_gps"
@@ -372,6 +375,21 @@ object Prefs {
             (sp.getString(KEY_FUEL_EVENTS, "") ?: "").hashCode().toString()
 
     val cloudConfigured: Boolean get() = cloudRepo.contains('/') && cloudToken.isNotEmpty()
+
+    /** Live-link key shared with the phone app via backups/link.json; made on first use. */
+    val linkKey: String
+        get() = sp.getString(KEY_LINK_KEY, null) ?: CarLink.newKey().also {
+            sp.edit().putString(KEY_LINK_KEY, it).putBoolean(KEY_LINK_UPLOADED, false).apply()
+        }
+
+    var linkKeyUploaded: Boolean
+        get() = sp.getBoolean(KEY_LINK_UPLOADED, false)
+        set(value) = sp.edit().putBoolean(KEY_LINK_UPLOADED, value).apply()
+
+    /** Last address the phone answered on, tried first next time. */
+    var linkPhone: String
+        get() = sp.getString(KEY_LINK_PHONE, "") ?: ""
+        set(value) = sp.edit().putString(KEY_LINK_PHONE, value).apply()
 
     /**
      * Replaces settings, trip history and fuel log with the backup's values. Values that

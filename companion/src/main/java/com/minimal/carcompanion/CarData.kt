@@ -36,13 +36,23 @@ class CarData(
     /** Fill-ups saved on the phone and not yet merged by the car. */
     var pending: List<InboxFill> = emptyList()
 
+    /** True when this came straight from the car over the live link (not the cloud). */
+    var live: Boolean = false
+
+    /** The same data with the trip in progress added (live link only) and the car's latest voltage. */
+    fun withLive(trip: TripRecord?, voltage: Float): CarData {
+        val t = if (trip != null && TripLog.worthKeeping(trip)) trips + trip else trips
+        return CarData(createdMs, sourceName, t, fuel, FuelModel.compute(fuel, t, gpsKm, createdMs), battery, gpsKm,
+            if (voltage > 0f) voltage else lastVoltage, fuelEvents).also { it.live = true; it.pending = pending }
+    }
+
     /** Same data with the phone's pending fill-ups applied, so the phone shows them at once. */
     fun withPending(fills: List<InboxFill>, events: List<com.minimal.carlauncher.core.FuelEvent>): CarData {
         if (fills.isEmpty()) return this.also { it.pending = fills }
         val merged = FuelInbox.merge(events, fills, gpsKm).events
         val f = FuelEstimator.replay(merged)
         return CarData(createdMs, sourceName, trips, f, FuelModel.compute(f, trips, gpsKm, createdMs),
-            battery, gpsKm, lastVoltage, merged).also { it.pending = fills }
+            battery, gpsKm, lastVoltage, merged).also { it.pending = fills; it.live = live }
     }
 
     companion object {
@@ -144,6 +154,17 @@ object CarCloud {
         }
     } catch (_: Exception) {
         emptyList()
+    }
+
+    /** The live-link key the car published in backups/link.json, or null. */
+    fun fetchLinkKey(repoName: String, token: String, passphrase: String): String? = try {
+        val r = get("${repo(repoName)}/contents/$DIR/${com.minimal.carlauncher.core.CarLink.LINK_FILE}", token, raw = true)
+        if (r.code != 200) null else {
+            val text = if (BackupCrypto.isEncrypted(r.body)) BackupCrypto.decrypt(r.body, passphrase) else r.body
+            text?.let { com.minimal.carlauncher.core.CarLink.parseLinkFile(it) }
+        }
+    } catch (_: Exception) {
+        null
     }
 
     fun fetch(repoName: String, token: String, passphrase: String): Result = try {
