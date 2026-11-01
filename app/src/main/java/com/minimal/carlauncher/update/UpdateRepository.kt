@@ -59,6 +59,9 @@ class UpdateRepository(
             Prefs.pendingApkPath = ""
             Prefs.lastSeenReleaseTag = cachedTag
             _badgeVisible.value = false
+        } else if (cachedTag.isNotEmpty()) {
+            // Survive a restart with an update still waiting (e.g. one the phone delivered).
+            readyFromCache()?.let { _state.value = it; _badgeVisible.value = true }
         }
     }
 
@@ -85,11 +88,12 @@ class UpdateRepository(
             _state.value = UpdateState.Checking
             when (val result = client.fetchLatest()) {
                 is GitHubReleaseClient.Result.Success -> onRelease(result.release)
+                // An update already here (e.g. from the phone) wins over a failed check.
                 is GitHubReleaseClient.Result.SoftFailure ->
-                    _state.value = if (force) UpdateState.Error("Could not reach GitHub")
+                    _state.value = readyFromCache() ?: if (force) UpdateState.Error("Could not reach GitHub")
                     else restoreCachedState()
                 is GitHubReleaseClient.Result.Failure ->
-                    _state.value = UpdateState.Error(result.message)
+                    _state.value = readyFromCache() ?: UpdateState.Error(result.message)
             }
         }
     }
@@ -164,6 +168,9 @@ class UpdateRepository(
         if (tag.isNotEmpty()) Prefs.lastSeenReleaseTag = tag
         _badgeVisible.value = false
     }
+
+    /** A downloaded, still-newer APK waiting to be installed, if any. */
+    private fun readyFromCache(): UpdateState? = (restoreCachedState() as? UpdateState.ReadyToInstall)
 
     private fun restoreCachedState(): UpdateState {
         val tag = Prefs.cachedLatestTag

@@ -1614,6 +1614,7 @@ class PanelService : Service() {
             handler.removeCallbacks(fastLink)
             if (up && playing) handler.postDelayed(fastLink, 4_000)
             if (up != linkWasUp) { linkWasUp = up; log(if (up) "live link: phone at ${r.reached}" else "live link: phone not reachable") }
+            r.note?.let { log("live link: $it") }
             if (r.added > 0) handler.post {
                 fuelModelAt = 0L
                 updateFuelDisplay()

@@ -34,7 +34,7 @@ object LiveLink {
     private val acked = ArrayList<String>()
 
     /** [update]: a launcher APK received from the phone (tag to file), ready to install. */
-    class Result(val reached: String?, val added: Int, val update: Pair<String, File>? = null)
+    class Result(val reached: String?, val added: Int, val update: Pair<String, File>? = null, val note: String? = null)
 
     /** Runs one exchange on a background thread; [done] is called on that thread. */
     fun tick(context: Context, extra: () -> CarLink.CarExtra, done: (Result) -> Unit) {
@@ -79,8 +79,11 @@ object LiveLink {
             synchronized(acked) { acked.addAll(res.processedIds) }
             added = res.added
         }
-        val update = got.offer?.let { fetchUpdate(context, ip, key, it) }
-        return Result(ip, added, update)
+        var note: String? = null
+        val update = got.offer?.let { o ->
+            fetchUpdate(context, ip, key, o) { note = it }
+        }
+        return Result(ip, added, update, note)
     }
 
     /**
@@ -88,12 +91,18 @@ object LiveLink {
      * SHA-256 came inside the sealed reply, so a corrupted or swapped file is thrown away; Android
      * also refuses an APK not signed with this app's key.
      */
-    private fun fetchUpdate(context: Context, ip: String, key: String, offer: CarLink.Offer): Pair<String, File>? {
+    private fun fetchUpdate(context: Context, ip: String, key: String, offer: CarLink.Offer, note: (String) -> Unit): Pair<String, File>? {
         if (CompanionUpdate.compare(offer.version, BuildConfig.VERSION_NAME) <= 0) return null
-        if (offer.size <= 0 || offer.size > MAX_APK_BYTES) return null
+        if (offer.size <= 0 || offer.size > MAX_APK_BYTES) { note("update ${offer.version}: bad size ${offer.size}"); return null }
         val tag = "v" + offer.version
         val dest = ApkInstaller.apkFileFor(context, tag)
-        if (dest.exists() && dest.length() == offer.size && CarLink.sha256(dest) == offer.sha256) return null  // already have it
+        // Already here (e.g. received before a restart): offer it again rather than staying silent.
+        if (dest.exists() && dest.length() == offer.size && CarLink.sha256(dest) == offer.sha256) return tag to dest
+        // Don't hammer the phone: one try per minute.
+        val now = System.currentTimeMillis()
+        if (now - lastFetchAt < 60_000L) return null
+        lastFetchAt = now
+        note("update ${offer.version}: downloading ${offer.size / 1024} KB from the phone")
         val part = File(dest.path + ".part")
         try {
             Socket().use { s ->
@@ -114,11 +123,13 @@ object LiveLink {
                     }
                 }
             }
-            if (part.length() != offer.size || CarLink.sha256(part) != offer.sha256) { part.delete(); return null }
+            if (part.length() != offer.size) { note("update ${offer.version}: got ${part.length()} of ${offer.size} bytes"); part.delete(); return null }
+            if (CarLink.sha256(part) != offer.sha256) { note("update ${offer.version}: checksum mismatch"); part.delete(); return null }
             dest.delete()
-            if (!part.renameTo(dest)) { part.delete(); return null }
+            if (!part.renameTo(dest)) { note("update ${offer.version}: could not save"); part.delete(); return null }
             return tag to dest
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            note("update ${offer.version}: failed after ${part.length() / 1024} KB - ${e.javaClass.simpleName}: ${e.message}")
             part.delete()
             return null
         }
@@ -165,6 +176,7 @@ object LiveLink {
         return found.get()
     }
 
+    @Volatile private var lastFetchAt = 0L
     private const val SCAN_EVERY_MS = 2 * 60_000L
     private const val MAX_APK_BYTES = 80L * 1024 * 1024
 }

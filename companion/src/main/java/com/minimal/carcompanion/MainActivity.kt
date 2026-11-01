@@ -326,7 +326,9 @@ class MainActivity : Activity() {
     }
 
     private fun showDiagnostics() {
-        val text = LinkStore.diag(this).ifEmpty { "Nothing yet. It appears after the car has connected over the live link." }
+        val phone = LinkStore.phoneLog(this)
+        val text = (if (phone.isNotEmpty()) "Phone:\n$phone\n\nCar:\n" else "") +
+            LinkStore.diag(this).ifEmpty { "Nothing yet. It appears after the car has connected over the live link." }
         val at = LinkStore.liveAt(this)
         AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
             .setTitle("Head unit diagnostics")

@@ -135,6 +135,8 @@ class LinkService : Service() {
         }
     }
 
+    @Volatile private var lastOfferNote = 0L
+
     private fun handle(s: Socket) {
         s.use {
             try {
@@ -146,16 +148,33 @@ class LinkService : Service() {
 
                 // Second connection: the car wants the launcher APK we offered.
                 CarLink.parseApkRequest(text, now)?.let { ver ->
-                    val offer = LinkStore.offer(this) ?: return
-                    if (offer.first.version != ver) return
+                    val offer = LinkStore.offer(this) ?: run { LinkStore.note(this, "car asked for $ver, but no file here"); return }
+                    if (offer.first.version != ver) { LinkStore.note(this, "car asked for $ver, phone has ${offer.first.version}"); return }
+                    LinkStore.note(this, "sending launcher $ver to the car")
                     s.soTimeout = 30_000
-                    s.getOutputStream().use { out -> offer.second.inputStream().use { it.copyTo(out, 64 * 1024) } }
+                    var sent = 0L
+                    try {
+                        s.getOutputStream().use { out ->
+                            offer.second.inputStream().use { inp ->
+                                val buf = ByteArray(64 * 1024)
+                                while (true) { val n = inp.read(buf); if (n < 0) break; out.write(buf, 0, n); sent += n }
+                                out.flush()
+                            }
+                        }
+                        LinkStore.note(this, "sent launcher $ver: ${sent / 1024} KB")
+                    } catch (e: Exception) {
+                        LinkStore.note(this, "sending $ver stopped after ${sent / 1024} KB: ${e.javaClass.simpleName}")
+                    }
                     return
                 }
 
                 val msg = CarLink.parseCar(text, now) ?: return
                 LinkStore.removeLocalFills(this, msg.acked)
                 val offer = LinkStore.offerFor(this, msg.extra.appVersion)
+                if (offer != null && now - lastOfferNote > 5 * 60_000L) {
+                    lastOfferNote = now
+                    LinkStore.note(this, "offering launcher ${offer.version} to the car (car has ${msg.extra.appVersion})")
+                }
                 // The car's music buttons drive the phone's player; then report what plays.
                 msg.extra.cmd?.let { PhoneMedia.run(this, it) }
                 val np = if (LinkStore.mediaOn(this)) PhoneMedia.nowPlaying(this, msg.extra.npArtKey) else null
@@ -167,7 +186,9 @@ class LinkService : Service() {
                     LinkStore.notifyListeners()
                     onCarMessage(msg)
                 }
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                LinkStore.note(this, "link error: ${e.javaClass.simpleName}: ${e.message}")
+            }
         }
     }
 
@@ -346,6 +367,15 @@ object LinkStore {
     fun setMediaOn(c: Context, on: Boolean) = sp(c).edit().putBoolean("mediaOn", on).apply()
     fun carVersion(c: Context): String = sp(c).getString("carVersion", "") ?: ""
     fun diag(c: Context): String = sp(c).getString("diag", "") ?: ""
+
+    /** The phone's own link log (newest first, last 20 lines), shown above the car's diagnostics. */
+    @Synchronized
+    fun note(c: Context, line: String) {
+        val t = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
+        val old = phoneLog(c).lines().filter { it.isNotBlank() }.take(19)
+        sp(c).edit().putString("phoneLog", (listOf("$t $line") + old).joinToString("\n")).apply()
+    }
+    fun phoneLog(c: Context): String = sp(c).getString("phoneLog", "") ?: ""
 
     @Synchronized
     fun saveLive(c: Context, m: CarLink.CarMsg, from: String) {
