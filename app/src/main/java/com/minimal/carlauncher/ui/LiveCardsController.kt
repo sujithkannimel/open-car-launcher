@@ -53,6 +53,9 @@ class LiveCardsController(
     private var current: MediaController? = null
 
     private val zlinkListener: () -> Unit = { render() }
+    private val phoneListener: () -> Unit = { render() }
+    /** True while the card shows the phone's song (YouTube Music via the live link). */
+    private var showingPhone = false
 
     private val callback = object : MediaController.Callback() {
         override fun onMetadataChanged(metadata: MediaMetadata?) = render()
@@ -76,6 +79,7 @@ class LiveCardsController(
             val c = current
             when {
                 c != null -> IntentUtil.launchPackage(activity, c.packageName)
+                showingPhone -> { showQueue(); true }
                 aaActive() -> { cards.openProjection(); true }
                 else -> false
             }
@@ -84,6 +88,7 @@ class LiveCardsController(
 
     fun start() {
         ZlinkStatus.addListener(zlinkListener)
+        com.minimal.carlauncher.core.PhoneMedia.addListener(phoneListener)
         if (hasAccess() && sessionManager != null && !listening) {
             try {
                 sessionManager.addOnActiveSessionsChangedListener(sessionsListener, listenerComponent, main)
@@ -95,6 +100,7 @@ class LiveCardsController(
 
     fun stop() {
         ZlinkStatus.removeListener(zlinkListener)
+        com.minimal.carlauncher.core.PhoneMedia.removeListener(phoneListener)
         if (listening) {
             runCatching { sessionManager?.removeOnActiveSessionsChangedListener(sessionsListener) }
             listening = false
@@ -154,13 +160,52 @@ class LiveCardsController(
             pausedApp != null -> pausedApp
             else -> null
         }
+        // The phone's song (live link) beats the bare "Android Auto · Playing", but a player
+        // actually playing on the head unit itself still comes first.
+        val phone = com.minimal.carlauncher.core.PhoneMedia.fresh()
+        val usePhone = phone != null && (playingApp == null) && (phone.playing || current == null)
+        if (usePhone) current = null
+        showingPhone = usePhone
         val c = current
         when {
+            usePhone -> showPhone(phone!!)
             c != null -> showPlayer(c)
             aaActive() -> showAndroidAuto(aaPlaying())
             else -> showIdle()
         }
         renderPhoneLink()
+    }
+
+    private fun showPhone(n: com.minimal.carlauncher.core.CarLink.NowPlaying) {
+        binding.titleMusic.text = n.title
+        binding.subtitleMusic.text = n.artist.ifBlank { n.app }
+        val art = com.minimal.carlauncher.core.PhoneMedia.art
+        if (art != null) {
+            binding.coverMusic.setImageBitmap(art)
+            binding.coverMusic.visibility = View.VISIBLE
+            binding.iconMusic.visibility = View.GONE
+        } else {
+            binding.coverMusic.visibility = View.GONE
+            binding.iconMusic.visibility = View.VISIBLE
+        }
+        binding.eqMusic.playing = n.playing
+        showControls(n.playing)
+    }
+
+    /** Up next from the phone's player; tap a song to jump to it. */
+    private fun showQueue() {
+        val n = com.minimal.carlauncher.core.PhoneMedia.fresh() ?: return
+        val items = n.queue
+        val b = androidx.appcompat.app.AlertDialog.Builder(activity)
+            .setTitle(n.title + if (n.artist.isNotBlank()) "  ·  " + n.artist else "")
+            .setNeutralButton("Open Android Auto") { _, _ -> cards.openProjection() }
+            .setNegativeButton("Close", null)
+        if (items.isEmpty()) b.setMessage("No queue from ${n.app}.")
+        else {
+            val labels = items.map { (if (it.id == n.activeQueueId) "\u25B6  " else "") + it.title + if (it.subtitle.isNotBlank()) "  ·  " + it.subtitle else "" }
+            b.setItems(labels.toTypedArray()) { _, i -> com.minimal.carlauncher.core.PhoneMedia.command("queue", items[i].id) }
+        }
+        b.show()
     }
 
     private fun showPlayer(c: MediaController) {
@@ -234,6 +279,15 @@ class LiveCardsController(
     // ------------------------------------------------------------------ controls
 
     private fun transport(keyCode: Int) {
+        if (showingPhone) {
+            val n = com.minimal.carlauncher.core.PhoneMedia.fresh()
+            com.minimal.carlauncher.core.PhoneMedia.command(when (keyCode) {
+                KeyEvent.KEYCODE_MEDIA_PREVIOUS -> "prev"
+                KeyEvent.KEYCODE_MEDIA_NEXT -> "next"
+                else -> if (n?.playing == true) "pause" else "play"
+            })
+            return
+        }
         val c = current
         if (c != null) {
             val t = c.transportControls

@@ -98,7 +98,10 @@ class LinkService : Service() {
                 val msg = CarLink.parseCar(text, now) ?: return
                 LinkStore.removeLocalFills(this, msg.acked)
                 val offer = LinkStore.offerFor(this, msg.extra.appVersion)
-                val reply = CarLink.seal(key, CarLink.phoneMessage(LinkStore.localFills(this), now, offer))
+                // The car's music buttons drive the phone's player; then report what plays.
+                msg.extra.cmd?.let { PhoneMedia.run(this, it) }
+                val np = if (LinkStore.mediaOn(this)) PhoneMedia.nowPlaying(this, msg.extra.npArtKey) else null
+                val reply = CarLink.seal(key, CarLink.phoneMessage(LinkStore.localFills(this), now, offer, np))
                 s.getOutputStream().apply { write((reply + "\n").toByteArray()); flush() }
                 LinkStore.saveLive(this, msg, s.inetAddress?.hostAddress.orEmpty())
                 main.post {
@@ -265,6 +268,9 @@ object LinkStore {
     fun setEnabled(c: Context, on: Boolean) = sp(c).edit().putBoolean("linkOn", on).apply()
 
     fun liveAt(c: Context) = sp(c).getLong("liveAt", 0L)
+    /** Share the phone's now-playing (song, cover, queue) with the car. */
+    fun mediaOn(c: Context) = sp(c).getBoolean("mediaOn", true)
+    fun setMediaOn(c: Context, on: Boolean) = sp(c).edit().putBoolean("mediaOn", on).apply()
     fun carVersion(c: Context): String = sp(c).getString("carVersion", "") ?: ""
     fun diag(c: Context): String = sp(c).getString("diag", "") ?: ""
 

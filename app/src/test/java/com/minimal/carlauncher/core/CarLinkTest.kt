@@ -67,6 +67,24 @@ class CarLinkTest {
         f.delete()
     }
 
+    @Test fun nowPlayingAndCommandsRoundTrip() {
+        val now = 1_800_000_000_000L
+        val np = CarLink.NowPlaying("com.google.android.apps.youtube.music", "YT Music", "Song", "Artist", "Album",
+            true, 30_000, 200_000, now, "k1", "QUJD", listOf(CarLink.QueueItem(5, "Next song", "Someone")), 4)
+        val back = CarLink.parsePhone(CarLink.phoneMessage(emptyList(), now, null, np), now)!!.np
+        assertEquals(np, back)
+        assertEquals(40_000L, np.positionAt(now + 10_000))
+        assertEquals(30_000L, np.copy(playing = false).positionAt(now + 10_000))
+        assertEquals(200_000L, np.positionAt(now + 999_000))
+        assertNull(CarLink.parsePhone(CarLink.phoneMessage(emptyList(), now), now)!!.np)
+
+        val cmd = CarLink.Cmd(7, "queue", 5)
+        val ex = CarLink.CarExtra(appVersion = "0.38", npArtKey = "k1", cmd = cmd)
+        val m = CarLink.parseCar(CarLink.carMessage(backup, null, 13.8f, now, emptyList(), ex), now)!!
+        assertEquals(cmd, m.extra.cmd)
+        assertEquals("k1", m.extra.npArtKey)
+    }
+
     @Test fun linkFileRoundTrip() {
         val k = CarLink.newKey()
         assertEquals(k, CarLink.parseLinkFile(CarLink.linkFile(k)))

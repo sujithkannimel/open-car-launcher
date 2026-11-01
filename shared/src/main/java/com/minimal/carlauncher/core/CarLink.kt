@@ -67,6 +67,42 @@ object CarLink {
         val pos: Pos? = null,
         /** Panel log and status lines for the phone's diagnostics screen. */
         val diag: String? = null,
+        /** Art key of the cover the car already has, so the phone only resends a new one. */
+        val npArtKey: String = "",
+        /** A tap on the car's music controls, for the phone's player. */
+        val cmd: Cmd? = null,
+    )
+
+    /** Player command: play, pause, next, prev, seek (value = ms), queue (value = queue item id). */
+    data class Cmd(val id: Long, val action: String, val value: Long = 0L)
+
+    data class QueueItem(val id: Long, val title: String, val subtitle: String)
+
+    /** What the phone's music app is playing. [artB64] is a small JPEG, sent only when the car lacks [artKey]. */
+    data class NowPlaying(
+        val pkg: String, val app: String, val title: String, val artist: String, val album: String,
+        val playing: Boolean, val posMs: Long, val durMs: Long, val posAt: Long,
+        val artKey: String, val artB64: String?, val queue: List<QueueItem>, val activeQueueId: Long,
+    ) {
+        /** Position now, running on from [posAt] while playing. */
+        fun positionAt(now: Long): Long =
+            if (!playing || posMs < 0) posMs else (posMs + (now - posAt)).let { if (durMs > 0) it.coerceAtMost(durMs) else it }
+    }
+
+    private fun npToJson(n: NowPlaying) = JSONObject()
+        .put("pkg", n.pkg).put("app", n.app).put("ti", n.title).put("ar", n.artist).put("al", n.album)
+        .put("pl", n.playing).put("pos", n.posMs).put("dur", n.durMs).put("pat", n.posAt)
+        .put("ak", n.artKey).put("art", n.artB64 ?: JSONObject.NULL)
+        .put("q", JSONArray(n.queue.map { JSONObject().put("id", it.id).put("t", it.title).put("s", it.subtitle) }))
+        .put("aq", n.activeQueueId)
+
+    private fun npFromJson(o: JSONObject) = NowPlaying(
+        o.optString("pkg"), o.optString("app"), o.optString("ti"), o.optString("ar"), o.optString("al"),
+        o.optBoolean("pl"), o.optLong("pos", -1), o.optLong("dur", -1), o.optLong("pat"),
+        o.optString("ak"), if (o.isNull("art")) null else o.optString("art").takeIf { it.isNotEmpty() },
+        o.optJSONArray("q")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) }
+            .map { QueueItem(it.optLong("id"), it.optString("t"), it.optString("s")) } }.orEmpty(),
+        o.optLong("aq", -1),
     )
 
     /** Car -> phone: the same backup JSON the cloud gets, plus the trip in progress. */
@@ -83,6 +119,8 @@ object CarLink {
         .put("ca", extra.chargeAlert)
         .put("pos", extra.pos?.let { JSONObject().put("la", it.lat).put("lo", it.lon).put("t", it.at).put("sp", it.speed.toDouble()) } ?: JSONObject.NULL)
         .put("diag", extra.diag ?: JSONObject.NULL)
+        .put("nak", extra.npArtKey)
+        .put("cmd", extra.cmd?.let { JSONObject().put("id", it.id).put("a", it.action).put("v", it.value) } ?: JSONObject.NULL)
         .toString()
 
     data class CarMsg(
@@ -105,6 +143,8 @@ object CarLink {
                 o.optInt("ca", 0),
                 o.optJSONObject("pos")?.let { Pos(it.getDouble("la"), it.getDouble("lo"), it.optLong("t"), it.optDouble("sp", 0.0).toFloat()) },
                 if (o.isNull("diag")) null else o.optString("diag"),
+                o.optString("nak"),
+                o.optJSONObject("cmd")?.let { Cmd(it.getLong("id"), it.getString("a"), it.optLong("v")) },
             ),
         )
     } catch (_: Exception) {
@@ -114,13 +154,14 @@ object CarLink {
     /** A launcher APK the phone has ready for the car (integrity: size + SHA-256, in the sealed reply). */
     data class Offer(val version: String, val size: Long, val sha256: String)
 
-    data class PhoneMsg(val fills: List<InboxFill>, val offer: Offer?)
+    data class PhoneMsg(val fills: List<InboxFill>, val offer: Offer?, val np: NowPlaying? = null)
 
-    /** Phone -> car: fill-ups the car hasn't acknowledged yet, and an update if the phone has one. */
-    fun phoneMessage(fills: List<InboxFill>, now: Long, offer: Offer? = null): String = JSONObject()
+    /** Phone -> car: fill-ups the car hasn't acknowledged yet, an update if the phone has one, what plays. */
+    fun phoneMessage(fills: List<InboxFill>, now: Long, offer: Offer? = null, np: NowPlaying? = null): String = JSONObject()
         .put("k", "phone").put("t", now)
         .put("fills", JSONArray(fills.map { JSONObject(it.toJson()) }))
         .put("offer", offer?.let { JSONObject().put("ver", it.version).put("size", it.size).put("sha", it.sha256) } ?: JSONObject.NULL)
+        .put("np", np?.let { npToJson(it) } ?: JSONObject.NULL)
         .toString()
 
     fun parsePhone(text: String, now: Long): PhoneMsg? = try {
@@ -129,6 +170,7 @@ object CarLink {
         else PhoneMsg(
             o.optJSONArray("fills")?.let { a -> (0 until a.length()).mapNotNull { InboxFill.parse(a.getJSONObject(it).toString()) } }.orEmpty(),
             o.optJSONObject("offer")?.let { Offer(it.getString("ver"), it.getLong("size"), it.getString("sha")) },
+            o.optJSONObject("np")?.let { npFromJson(it) },
         )
     } catch (_: Exception) {
         null

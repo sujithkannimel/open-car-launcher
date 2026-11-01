@@ -411,6 +411,19 @@ class MainActivity : Activity() {
         }
         content.addView(hero, lp(bottom = 12))
         parkedCard()?.let { content.addView(it, lp(bottom = 12)) }
+        if (LinkStore.key(this) != null && LinkStore.mediaOn(this) && !PhoneMedia.hasAccess(this)) {
+            val box = cardBox()
+            box.addView(TextView(this).apply {
+                text = "Show your songs on the car"
+                setTextColor(TEXT); textSize = 16f; typeface = Typeface.DEFAULT_BOLD
+            })
+            box.addView(small("Allow notification access so the head unit's Music card shows the song, artist and cover from YouTube Music on this phone, and its buttons control it. Nothing is read from your notifications."))
+            box.addView(button("Allow") {
+                try { startActivity(Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
+                catch (_: Exception) { Toast.makeText(this, "Open Settings > Notifications > Device & app notifications", Toast.LENGTH_LONG).show() }
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, px(44)).apply { topMargin = px(10) })
+            content.addView(box, lp(bottom = 12))
+        }
 
         val refuel = FuelModel.refuelBy(range, m.dailyKm, d.createdMs)
         val restDay = d.battery.lastOrNull { it.resting > 0f }
@@ -662,12 +675,18 @@ class MainActivity : Activity() {
             setTextColor(CYAN); textSize = 14f; setPadding(0, px(4), 0, px(8))
             setOnClickListener { showDiagnostics() }
         })
+        val mediaBox = android.widget.CheckBox(this).apply {
+            text = "Show the phone's song on the car"
+            isChecked = LinkStore.mediaOn(this@MainActivity)
+            setTextColor(TEXT)
+        }
         val linkBox = android.widget.CheckBox(this).apply {
             text = "Live link with the car (no internet needed)"
             isChecked = LinkStore.enabled(this@MainActivity)
             setTextColor(TEXT)
         }
         col.addView(linkBox)
+        col.addView(mediaBox)
         col.addView(small(if (LinkStore.key(this) == null) "Waiting for the car to share its link key (needs the car online once)."
             else "Ready. The car sends data straight to this phone on home Wi-Fi and during Android Auto."))
         AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
@@ -678,6 +697,7 @@ class MainActivity : Activity() {
                 tok.text.toString().trim().takeIf { it.isNotEmpty() }?.let { token = it }
                 passphrase = pass.text.toString()
                 LinkStore.setEnabled(this, linkBox.isChecked)
+                LinkStore.setMediaOn(this, mediaBox.isChecked)
                 if (linkBox.isChecked) LinkService.start(this) else LinkService.stop(this)
                 refresh()
             }

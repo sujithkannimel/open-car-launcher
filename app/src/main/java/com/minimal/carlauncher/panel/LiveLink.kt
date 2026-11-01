@@ -42,11 +42,15 @@ object LiveLink {
         busy = true
         val app = context.applicationContext
         Thread {
-            try { done(exchangeOnce(app, extra())) } catch (_: Exception) { done(Result(null, 0)) } finally { busy = false }
+            try {
+                // Carry the cover the car already has and any music button press for the phone.
+                val cmd = com.minimal.carlauncher.core.PhoneMedia.pendingCmd
+                done(exchangeOnce(app, extra().copy(npArtKey = com.minimal.carlauncher.core.PhoneMedia.artKey, cmd = cmd), cmd))
+            } catch (_: Exception) { done(Result(null, 0)) } finally { busy = false }
         }.start()
     }
 
-    private fun exchangeOnce(context: Context, extra: CarLink.CarExtra): Result {
+    private fun exchangeOnce(context: Context, extra: CarLink.CarExtra, cmd: CarLink.Cmd?): Result {
         val key = Prefs.linkKey
         val now = System.currentTimeMillis()
         val ack = synchronized(acked) { acked.toList() }
@@ -66,6 +70,7 @@ object LiveLink {
         val got = reply ?: return Result(null, 0)
         val ip = reached ?: return Result(null, 0)
         synchronized(acked) { acked.removeAll(ack.toSet()) }
+        com.minimal.carlauncher.core.PhoneMedia.onReply(got.np, cmd)
 
         var added = 0
         if (got.fills.isNotEmpty()) {

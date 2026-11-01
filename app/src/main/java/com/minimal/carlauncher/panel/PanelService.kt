@@ -194,6 +194,7 @@ class PanelService : Service() {
         registerVolumeReceiver()
         registerVolumeObserver()
         registerZlinkReceiver()
+        com.minimal.carlauncher.core.PhoneMedia.kick = { handler.post { liveLinkTick() } }
         lastHeartbeatMs = 0L
         tripHeartbeat()
         startGpsOdometer()
@@ -1540,11 +1541,17 @@ class PanelService : Service() {
     }
 
     private var linkWasUp = false
+    private val fastLink = Runnable { liveLinkTick() }
 
     /** Pushes live data straight to the phone app (no internet needed) and takes its fill-ups. */
     private fun liveLinkTick() {
         LiveLink.tick(this, { linkExtra() }) { r ->
             val up = r.reached != null
+            // While music plays, ask the phone every 4 s so song changes show up quickly.
+            val playing = com.minimal.carlauncher.core.ZlinkStatus.audio ||
+                com.minimal.carlauncher.core.PhoneMedia.fresh()?.playing == true
+            handler.removeCallbacks(fastLink)
+            if (up && playing) handler.postDelayed(fastLink, 4_000)
             if (up != linkWasUp) { linkWasUp = up; log(if (up) "live link: phone at ${r.reached}" else "live link: phone not reachable") }
             if (r.added > 0) handler.post {
                 fuelModelAt = 0L
