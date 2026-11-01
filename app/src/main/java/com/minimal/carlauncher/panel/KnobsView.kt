@@ -79,10 +79,11 @@ class KnobsView(
         textAlign = Paint.Align.CENTER
         letterSpacing = 0.18f
     }
+    /** Play / pause: neon gradient (cyan -> violet -> pink) with a strong glow; shader set per draw. */
     private val iconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Neon.PINK
+        color = Color.WHITE
         style = Paint.Style.FILL
-        setShadowLayer(12f, 0f, 0f, Neon.alpha(Neon.PINK, 190))
+        setShadowLayer(18f, 0f, 0f, Neon.alpha(Neon.VIOLET, 230))
     }
     private val iconPath = android.graphics.Path()
     private val arcPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -249,6 +250,7 @@ class KnobsView(
 
     /** Crisp vector play triangle or pause bars, centred on (x, y), half-size s. */
     private fun drawPlayPause(c: Canvas, x: Float, y: Float, s: Float, paused: Boolean) {
+        iconPaint.shader = LinearGradient(x - s, y - s, x + s, y + s, Neon.GRADIENT, null, Shader.TileMode.CLAMP)
         iconPath.reset()
         if (paused) {
             val bw = s * 0.42f; val gap = s * 0.36f; val r = bw * 0.35f

@@ -66,6 +66,21 @@ class LiveCardsController(
     private val sessionsListener = MediaSessionManager.OnActiveSessionsChangedListener { refreshSessions(it.orEmpty()) }
 
     fun bind() {
+        // Long song titles scroll instead of being cut off.
+        binding.titleMusic.apply {
+            isSingleLine = true
+            ellipsize = android.text.TextUtils.TruncateAt.MARQUEE
+            marqueeRepeatLimit = -1
+            isSelected = true
+        }
+        // Rounded album cover.
+        binding.coverMusic.apply {
+            val r = 10f * resources.displayMetrics.density
+            outlineProvider = object : android.view.ViewOutlineProvider() {
+                override fun getOutline(v: View, o: android.graphics.Outline) = o.setRoundRect(0, 0, v.width, v.height, r)
+            }
+            clipToOutline = true
+        }
         NeonIcons.apply(binding.iconProjection, R.drawable.ic_phone_link)
         NeonIcons.apply(binding.iconNav, R.drawable.ic_navigation)
         NeonIcons.apply(binding.iconMusic, R.drawable.ic_music)
@@ -255,7 +270,10 @@ class LiveCardsController(
 
     private fun renderPhoneLink() {
         val sub = binding.subtitleProjection
-        when (ZlinkStatus.link) {
+        // ZLink announces CONNECTED once; after a launcher restart mid-drive, its audio session
+        // still shows Android Auto is up.
+        val link = if (ZlinkStatus.link == ZlinkStatus.Link.NONE && aaPlaying()) ZlinkStatus.Link.CONNECTED else ZlinkStatus.link
+        when (link) {
             ZlinkStatus.Link.CONNECTED -> {
                 sub.text = activity.getString(R.string.link_connected, ZlinkStatus.modeLabel())
                 sub.setTextColor(ContextCompat.getColor(activity, R.color.cockpit_accent))

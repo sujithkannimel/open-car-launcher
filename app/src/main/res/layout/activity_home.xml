@@ -612,7 +612,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
                 android:layout_marginStart="10dp"
-                android:layout_marginTop="44dp"
+                android:layout_marginTop="62dp"
                 android:layout_marginEnd="10dp"
                 android:layout_marginBottom="10dp" />
 
@@ -629,8 +629,8 @@
                     android:orientation="horizontal">
 
                     <FrameLayout
-                        android:layout_width="36dp"
-                        android:layout_height="36dp">
+                        android:layout_width="52dp"
+                        android:layout_height="52dp">
 
                         <ImageView
                             android:id="@+id/iconMusic"
@@ -661,7 +661,8 @@
                             style="@style/Text.Gauge"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:ellipsize="end"
+                            android:ellipsize="marquee"
+                            android:marqueeRepeatLimit="marquee_forever"
                             android:text="@string/card_music"
                             android:textSize="@dimen/card_label_text" />
 

@@ -195,6 +195,8 @@ class PanelService : Service() {
         registerVolumeObserver()
         registerZlinkReceiver()
         com.minimal.carlauncher.core.PhoneMedia.kick = { handler.post { liveLinkTick() } }
+        com.minimal.carlauncher.core.ZlinkStatus.addListener(playSync)
+        com.minimal.carlauncher.core.PhoneMedia.addListener(playSync)
         lastHeartbeatMs = 0L
         tripHeartbeat()
         startGpsOdometer()
@@ -1078,6 +1080,19 @@ class PanelService : Service() {
                 onVoltageReading(v)
                 return
             }
+        }
+    }
+
+    /**
+     * Right-knob glyph follows Android Auto too: ZLink's audio on/off and the phone's player
+     * state over the live link (ZLink itself never reports play/pause to the head unit).
+     */
+    private val playSync: () -> Unit = {
+        val phone = com.minimal.carlauncher.core.PhoneMedia.fresh()
+        val playing = phone?.playing ?: com.minimal.carlauncher.core.ZlinkStatus.audio
+        if (playing != isPlayingState) {
+            isPlayingState = playing
+            updatePlayPauseState()
         }
     }
 
