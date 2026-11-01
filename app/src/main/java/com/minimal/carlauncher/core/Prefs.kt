@@ -70,6 +70,8 @@ object Prefs {
     const val KEY_CUR_TRIP_IDLE = "pref_cur_trip_idle"
     const val KEY_CUR_TRIP_MAX = "pref_cur_trip_max"
     const val KEY_CUR_TRIP_HWY = "pref_cur_trip_hwy"
+    const val KEY_CUR_TRIP_HA = "pref_cur_trip_hard_accel"
+    const val KEY_CUR_TRIP_HB = "pref_cur_trip_hard_brake"
     const val KEY_BATTERY_LOG = "pref_battery_log"
     const val KEY_WEATHER_JSON = "pref_weather_json"
     const val KEY_STAY_ON_CONNECT = "pref_stay_on_connect"
@@ -460,7 +462,7 @@ object Prefs {
         if (start <= 0L) return null
         val km = (gpsOdoKm - curTripGpsStart).coerceAtLeast(0.0)
         return TripRecord(start, now, km, curTripDriveSec, curTripIdleSec, curTripMaxKmh,
-            curTripHwyKm.toDouble().coerceAtMost(km))
+            curTripHwyKm.toDouble().coerceAtMost(km), curTripHardAccel, curTripHardBrake)
     }
 
     /** City / highway fuel model over all recorded trips including the live one. */
@@ -472,6 +474,14 @@ object Prefs {
     var curTripMaxKmh: Float
         get() = sp.getFloat(KEY_CUR_TRIP_MAX, 0f)
         set(value) = sp.edit().putFloat(KEY_CUR_TRIP_MAX, value).apply()
+
+    /** Hard accelerations / brakes in the trip in progress (for the eco score). */
+    var curTripHardAccel: Int
+        get() = sp.getInt(KEY_CUR_TRIP_HA, 0)
+        set(value) = sp.edit().putInt(KEY_CUR_TRIP_HA, value).apply()
+    var curTripHardBrake: Int
+        get() = sp.getInt(KEY_CUR_TRIP_HB, 0)
+        set(value) = sp.edit().putInt(KEY_CUR_TRIP_HB, value).apply()
 
     /** Keep the current screen when ZLink jumps to the front on phone connect. */
     var stayOnConnect: Boolean

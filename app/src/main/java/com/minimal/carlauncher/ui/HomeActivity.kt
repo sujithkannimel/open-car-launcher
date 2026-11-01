@@ -97,6 +97,7 @@ class HomeActivity : AppCompatActivity() {
         liveCards = LiveCardsController(this, binding, cards)
         liveCards.bind()
 
+        styleSporty()
         bindDashboardClicks()
         bindDockActions()
         bindBackBehaviour()
@@ -235,10 +236,36 @@ class HomeActivity : AppCompatActivity() {
 
     // ------------------------------------------------------------- dashboard render
 
+    /** Racing look: forward-leaning digits, neon seconds, glowing speed, segment bars. */
+    private fun styleSporty() {
+        val lean = -0.18f
+        listOf(binding.clockTime, binding.clockSeconds, binding.textSpeed, binding.textSpeedUnit)
+            .forEach { it.paint.textSkewX = lean; it.setPadding(it.paddingLeft, it.paddingTop, it.paddingRight + 8, it.paddingBottom) }
+        binding.clockTime.setShadowLayer(14f, 0f, 0f, com.minimal.carlauncher.core.Neon.alpha(com.minimal.carlauncher.core.Neon.CYAN, 110))
+        binding.textSpeed.setShadowLayer(18f, 0f, 0f, com.minimal.carlauncher.core.Neon.alpha(com.minimal.carlauncher.core.Neon.PINK, 170))
+        // Seconds in the neon gradient once their width is known.
+        binding.clockSeconds.addOnLayoutChangeListener { v, l, t, r, b, _, _, _, _ ->
+            val tv = v as android.widget.TextView
+            tv.paint.shader = android.graphics.LinearGradient(0f, 0f, (r - l).toFloat(), (b - t).toFloat(),
+                com.minimal.carlauncher.core.Neon.GRADIENT, null, android.graphics.Shader.TileMode.CLAMP)
+        }
+        binding.secondsBar.segments = 30
+        binding.speedBar.segments = 16
+        binding.clockSeconds.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun afterTextChanged(e: android.text.Editable?) {
+                val sec = e?.toString()?.toIntOrNull() ?: return
+                binding.secondsBar.level = (sec + 1) / 60f
+            }
+        })
+    }
+
     private fun render(state: VehicleState) {
         val unit = viewModel.speedUnit.value
 
         binding.textSpeed.text = Format.speedText(unit, state.speedMps, state.hasFix)
+        binding.speedBar.level = if (state.hasFix) state.speedMps * 3.6f / 160f else 0f
         binding.textSpeedUnit.text = Format.unitLabel(unit)
         binding.textSpeedStatus.setText(
             when {

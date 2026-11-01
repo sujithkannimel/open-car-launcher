@@ -280,7 +280,7 @@ class TripsActivity : AppCompatActivity() {
                 "avg " + speed(t.avgKmh),
                 "top " + speed(t.maxKmh),
                 String.format(Locale.US, "\u2248%.1f L", litres(t)),
-            )
+            ) + listOfNotNull(com.minimal.carlauncher.core.EcoScore.of(t)?.let { "eco ${it.score}" })
             content.addView(logRow(dayTime.format(Date(t.start)), "", parts.joinToString("   "),
                 if (t.idleSec > 60) "idle " + dur(t.idleSec) else "", null))
         }

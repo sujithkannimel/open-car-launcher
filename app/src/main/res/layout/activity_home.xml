@@ -165,9 +165,10 @@
                         style="@style/Text.Gauge"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:fontFamily="sans-serif-black"
+                        android:fontFamily="sans-serif-condensed"
                         android:text="@string/speed_placeholder"
-                        android:textColor="@color/cockpit_speed"
+                        android:textColor="#FFF3F4F6"
+                        android:textStyle="bold|italic"
                         android:textSize="@dimen/speed_text"
                         tools:text="62" />
 
@@ -178,9 +179,17 @@
                         android:layout_height="wrap_content"
                         android:layout_marginStart="6dp"
                         android:text="@string/unit_kmh"
-                        android:textColor="@color/cockpit_text_secondary"
+                        android:textAllCaps="true"
+                        android:textColor="#FFF472B6"
+                        android:textStyle="bold|italic"
                         android:textSize="@dimen/speed_unit_text" />
                 </LinearLayout>
+
+                <!-- Neon segment bar that fills with the speed. -->
+                <com.minimal.carlauncher.ui.view.SportBarView
+                    android:id="@+id/speedBar"
+                    android:layout_width="150dp"
+                    android:layout_height="14dp" />
 
                 <!-- Live GPS lock indicator. -->
                 <TextView
@@ -335,6 +344,8 @@
                     android:layout_height="wrap_content"
                     android:format12Hour="h:mm"
                     android:format24Hour="HH:mm"
+                    android:fontFamily="sans-serif-condensed"
+                    android:textStyle="bold|italic"
                     android:textSize="@dimen/clock_text"
                     tools:text="12:47" />
 
@@ -346,10 +357,18 @@
                     android:layout_marginStart="4dp"
                     android:format12Hour="ss"
                     android:format24Hour="ss"
-                    android:textColor="@color/cockpit_accent"
+                    android:fontFamily="sans-serif-condensed"
+                    android:textStyle="bold|italic"
+                    android:textColor="#FF8B5CF6"
                     android:textSize="@dimen/clock_seconds_text"
                     tools:text="09" />
             </LinearLayout>
+
+            <!-- Slanted rev-counter bar that fills with the seconds. -->
+            <com.minimal.carlauncher.ui.view.SportBarView
+                android:id="@+id/secondsBar"
+                android:layout_width="190dp"
+                android:layout_height="14dp" />
 
             <TextClock
                 android:id="@+id/clockDay"
@@ -359,6 +378,9 @@
                 android:layout_marginTop="2dp"
                 android:format12Hour="EEEE"
                 android:format24Hour="EEEE"
+                android:letterSpacing="0.18"
+                android:textAllCaps="true"
+                android:textStyle="bold|italic"
                 android:textColor="@color/cockpit_text_secondary"
                 android:textSize="@dimen/date_text"
                 tools:text="TUESDAY" />
@@ -368,9 +390,11 @@
                 style="@style/Text.Caption"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:format12Hour="d MMMM yyyy"
-                android:format24Hour="d MMMM yyyy"
-                android:textAllCaps="false"
+                android:format12Hour="d MMM yyyy"
+                android:format24Hour="d MMM yyyy"
+                android:letterSpacing="0.12"
+                android:textAllCaps="true"
+                android:textStyle="italic"
                 android:textSize="@dimen/date_text"
                 tools:text="16 September 2026" />
         </LinearLayout>

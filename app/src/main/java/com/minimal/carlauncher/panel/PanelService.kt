@@ -1285,6 +1285,7 @@ class PanelService : Service() {
         // Standing still only counts as idling while the engine runs (alternator charging);
         // with just the screen on (ACC) no fuel is used. No recent reading: count it.
         if (mps >= 1.5) tripDriveAcc += dt else if (engineMaybeRunning()) tripIdleAcc += dt
+        countHardEvents(p, l, dt)
         // Just stopped: push to the phone now, so its "parked here" spot is where the car stands.
         if (mps >= 2.0) wasMoving = true
         else if (wasMoving && mps < 0.5) { wasMoving = false; handler.post { liveLinkTick() } }
@@ -1538,7 +1539,10 @@ class PanelService : Service() {
             Prefs.curTripIdleSec = 0L
             Prefs.curTripMaxKmh = 0f
             Prefs.curTripHwyKm = 0f
+            Prefs.curTripHardAccel = 0
+            Prefs.curTripHardBrake = 0
             tripDriveAcc = 0.0; tripIdleAcc = 0.0; tripMaxKmh = 0f; tripHwyAcc = 0.0
+            hardAccelAcc = 0; hardBrakeAcc = 0
             restingWindowOpen = true
             seenChargingThisTrip = false
             ignitionElapsed = SystemClock.elapsedRealtime()
@@ -1659,6 +1663,27 @@ class PanelService : Service() {
         }.start()
     }
 
+    private var hardAccelAcc = 0
+    private var hardBrakeAcc = 0
+    private var lastHardAt = 0L
+
+    /**
+     * Hard acceleration / braking from the change in GPS speed between two good fixes close in
+     * time. One event per 5 s at most, so one long hard stop counts once.
+     */
+    private fun countHardEvents(p: android.location.Location, l: android.location.Location, dt: Double) {
+        if (!p.hasSpeed() || !l.hasSpeed() || dt < 0.8 || dt > 3.5) return
+        if (l.accuracy > 15f || p.accuracy > 15f) return
+        if (maxOf(p.speed, l.speed) < 3f) return                      // ~10 km/h: parking moves don't count
+        val a = (l.speed - p.speed) / dt
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastHardAt < 5_000L) return
+        when {
+            a >= com.minimal.carlauncher.core.EcoScore.HARD_ACCEL_MS2 -> { hardAccelAcc++; lastHardAt = now }
+            a <= com.minimal.carlauncher.core.EcoScore.HARD_BRAKE_MS2 -> { hardBrakeAcc++; lastHardAt = now }
+        }
+    }
+
     @Volatile private var lastVoltAt = 0L
     private var wasMoving = false
 
@@ -1678,7 +1703,7 @@ class PanelService : Service() {
             else (Prefs.tripLastGps - startGps).coerceAtLeast(0.0)
         val rec = com.minimal.carlauncher.core.TripRecord(
             start, end, km, Prefs.curTripDriveSec, Prefs.curTripIdleSec, Prefs.curTripMaxKmh,
-            Prefs.curTripHwyKm.toDouble().coerceAtMost(km)
+            Prefs.curTripHwyKm.toDouble().coerceAtMost(km), Prefs.curTripHardAccel, Prefs.curTripHardBrake
         )
         Prefs.tripHistory = com.minimal.carlauncher.core.TripLog.append(Prefs.tripHistory, rec)
         log(if (rec.isParked) String.format(Locale.US, "parked idling saved: %d min", rec.idleSec / 60)
@@ -1701,6 +1726,8 @@ class PanelService : Service() {
         if (idle > 0) { Prefs.curTripIdleSec = Prefs.curTripIdleSec + idle; tripIdleAcc -= idle }
         if (tripMaxKmh > Prefs.curTripMaxKmh) Prefs.curTripMaxKmh = tripMaxKmh
         if (tripHwyAcc > 0.0) { Prefs.curTripHwyKm = Prefs.curTripHwyKm + tripHwyAcc.toFloat(); tripHwyAcc = 0.0 }
+        if (hardAccelAcc > 0) { Prefs.curTripHardAccel = Prefs.curTripHardAccel + hardAccelAcc; hardAccelAcc = 0 }
+        if (hardBrakeAcc > 0) { Prefs.curTripHardBrake = Prefs.curTripHardBrake + hardBrakeAcc; hardBrakeAcc = 0 }
     }
 
     private fun tripText(): String {

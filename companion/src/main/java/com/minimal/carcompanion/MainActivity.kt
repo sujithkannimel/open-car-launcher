@@ -496,6 +496,17 @@ class MainActivity : Activity() {
             tot(TripLog.startOfToday(now), "Today"), tot(TripLog.startOfWeek(now), "This week"),
             tot(TripLog.startOfMonth(now), "This month"), tot(0L, "All time"),
         ))
+
+        // This week against last week, the same for months.
+        content.addView(section("Compared"))
+        val wk = TripLog.startOfWeek(now); val lastWk = com.minimal.carlauncher.core.Summaries.lastWeekStart(now)
+        val mo = TripLog.startOfMonth(now); val lastMo = com.minimal.carlauncher.core.Summaries.prevMonthStart(now)
+        val lit: (TripRecord) -> Float = { litres(d, it) }
+        content.addView(compareCard("This week", com.minimal.carlauncher.core.Summaries.of(d.trips, wk, Long.MAX_VALUE, lit),
+            "last week", com.minimal.carlauncher.core.Summaries.of(d.trips, lastWk, wk, lit)), lp(bottom = 10))
+        content.addView(compareCard("This month", com.minimal.carlauncher.core.Summaries.of(d.trips, mo, Long.MAX_VALUE, lit),
+            "last month", com.minimal.carlauncher.core.Summaries.of(d.trips, lastMo, mo, lit)), lp(bottom = 10))
+
         content.addView(section("Trips"))
         if (d.trips.isEmpty()) { content.addView(body("No finished trips yet.")); return }
         var lastDay = ""
@@ -506,11 +517,31 @@ class MainActivity : Activity() {
                 content.addView(label(dayName).apply { typeface = Typeface.DEFAULT_BOLD; setPadding(px(4), px(12), 0, px(8)) })
             }
             val right = if (t.isParked) "Parked" else String.format(Locale.US, "%.1f km", t.km)
+            val eco = com.minimal.carlauncher.core.EcoScore.of(t)
             val detail = "${timeFmt.format(Date(t.start))} - ${timeFmt.format(Date(t.end))}  ·  " +
                 (if (t.isParked) "idling ${dur(t.idleSec)}" else dur(t.durationSec)) + "  ·  " +
-                String.format(Locale.US, "≈%.1f L", litres(d, t))
+                String.format(Locale.US, "≈%.1f L", litres(d, t)) + (eco?.let { "  ·  Eco ${it.score}" } ?: "")
             content.addView(row(detail, null, right) { tripDetail(d, t) }, lp(bottom = 8))
         }
+    }
+
+    /** "This week 412 km +12% vs last week · 9h · ≈23 L · Eco 88". */
+    private fun compareCard(title: String, a: com.minimal.carlauncher.core.PeriodSummary, prevName: String,
+                            b: com.minimal.carlauncher.core.PeriodSummary): View {
+        val box = cardBox()
+        box.addView(label(title))
+        box.addView(TextView(this).apply {
+            text = String.format(Locale.US, "%.0f km", a.km) +
+                com.minimal.carlauncher.core.Summaries.change(a.km, b.km).let { if (it.isEmpty()) "" else "  $it vs $prevName" }
+            setTextColor(TEXT); textSize = 20f; typeface = Typeface.DEFAULT_BOLD
+        })
+        box.addView(small(buildString {
+            append("${a.trips} trips · ${dur(a.driveSec)} driving · " + String.format(Locale.US, "≈%.1f L", a.litres))
+            append(" · idled ${dur(a.idleSec)}")
+            if (a.eco >= 0) append(" · Eco ${a.eco}")
+            if (b.trips > 0) append(String.format(Locale.US, "\n%s: %.0f km · %d trips", prevName.replaceFirstChar { it.uppercase() }, b.km, b.trips))
+        }))
+        return box
     }
 
     private fun tripDetail(d: CarData, t: TripRecord) {
@@ -525,6 +556,10 @@ class MainActivity : Activity() {
             append("Top speed     ${speed(t.maxKmh)}\n")
             append("Highway       $hwy\n")
             append(String.format(Locale.US, "Fuel (est.)   %.2f L  (idling %.2f L)", litres(d, t), FuelModel.idleLitres(t.idleSec)))
+            if (t.hardAccel >= 0) {
+                append("\n\nHard accel    ${t.hardAccel}\nHard brakes   ${t.hardBrake}")
+                com.minimal.carlauncher.core.EcoScore.of(t)?.let { append("\nEco score     ${it.score} / 100\n${it.tip}") }
+            }
         }
         AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
             .setTitle("Trip").setMessage(msg).setPositiveButton("OK", null).show()

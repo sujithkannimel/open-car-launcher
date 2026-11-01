@@ -49,16 +49,74 @@ class LinkService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    private val summaryCheck = object : Runnable {
+        override fun run() { checkSummaries(); main.postDelayed(this, 30 * 60_000L) }
+    }
+
     override fun onCreate() {
         super.onCreate()
         startForegroundNow(getString(R.string.link_waiting))
         Thread({ serve() }, "car-link").start()
+        main.postDelayed(summaryCheck, 60_000L)
+    }
+
+    /**
+     * Sunday from 8 pm: last 7 days against the week before. The 1st of the month from 9 am:
+     * last month against the one before. Each sent once.
+     */
+    private fun checkSummaries() {
+        val d = LinkStore.cached(this) ?: return
+        val cal = java.util.Calendar.getInstance()
+        val now = cal.timeInMillis
+        val sp = getSharedPreferences("companion", Context.MODE_PRIVATE)
+        val m = d.model
+        val lit: (TripRecord) -> Float = { FuelModel.tripLitres(it, m.kmplCity, m.kmplHwy, m.recentHwyShare) }
+        val S = com.minimal.carlauncher.core.Summaries
+        if (cal.get(java.util.Calendar.DAY_OF_WEEK) == java.util.Calendar.SUNDAY && cal.get(java.util.Calendar.HOUR_OF_DAY) >= 20) {
+            val wk = TripLog.startOfWeek(now)
+            if (sp.getLong("weekSent", 0L) != wk) {
+                sp.edit().putLong("weekSent", wk).apply()
+                val a = S.of(d.trips, wk, Long.MAX_VALUE, lit); val b = S.of(d.trips, S.lastWeekStart(now), wk, lit)
+                if (a.trips > 0) summaryNote(ID_WEEK, "Your week in the car", a, b, "last week")
+            }
+        }
+        if (cal.get(java.util.Calendar.DAY_OF_MONTH) == 1 && cal.get(java.util.Calendar.HOUR_OF_DAY) >= 9) {
+            val mo = TripLog.startOfMonth(now)
+            if (sp.getLong("monthSent", 0L) != mo) {
+                sp.edit().putLong("monthSent", mo).apply()
+                val prev = S.prevMonthStart(now)
+                val before = java.util.Calendar.getInstance().apply { timeInMillis = prev; add(java.util.Calendar.MONTH, -1) }.timeInMillis
+                val a = S.of(d.trips, prev, mo, lit); val b = S.of(d.trips, before, prev, lit)
+                if (a.trips > 0) summaryNote(ID_MONTH, SimpleDateFormat("MMMM", Locale.US).format(Date(prev)) + " in the car", a, b, "the month before")
+            }
+        }
+    }
+
+    private fun summaryNote(id: Int, title: String, a: com.minimal.carlauncher.core.PeriodSummary,
+                            b: com.minimal.carlauncher.core.PeriodSummary, prevName: String) {
+        val change = com.minimal.carlauncher.core.Summaries.change(a.km, b.km)
+        val text = buildString {
+            append(String.format(Locale.US, "%.0f km in %d trips", a.km, a.trips))
+            if (change.isNotEmpty()) append(" ($change vs $prevName)")
+            append(String.format(Locale.US, " · %s driving · ≈%.1f L · idled %s", dur(a.driveSec), a.litres, dur(a.idleSec)))
+            if (a.eco >= 0) append(" · Eco ${a.eco}")
+        }
+        val n = Notification.Builder(this, ensureChannel(CH_TRIPS, R.string.ch_trips, NotificationManager.IMPORTANCE_DEFAULT))
+            .setSmallIcon(R.drawable.ic_link)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(Notification.BigTextStyle().bigText(text))
+            .setContentIntent(openApp())
+            .setAutoCancel(true)
+            .build()
+        getSystemService(NotificationManager::class.java).notify(id, n)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
 
     override fun onDestroy() {
         main.removeCallbacks(tripEnd)
+        main.removeCallbacks(summaryCheck)
         runCatching { server?.close() }
         server = null
         super.onDestroy()
@@ -164,6 +222,7 @@ class LinkService : Service() {
             append(String.format(Locale.US, "%.1f km · %s", trip.km, dur(trip.durationSec)))
             if (litres > 0f) append(String.format(Locale.US, " · ≈%.1f L", litres))
             if (trip.idleSec >= 60) append(" · idled ${dur(trip.idleSec)}")
+            com.minimal.carlauncher.core.EcoScore.of(trip)?.let { append(" · Eco ${it.score} (${it.tip.lowercase(Locale.US)})") }
         }
         val pos = LinkStore.pos(this)
         val b = Notification.Builder(this, ensureChannel(CH_TRIPS, R.string.ch_trips, NotificationManager.IMPORTANCE_DEFAULT))
@@ -233,6 +292,8 @@ class LinkService : Service() {
         private const val CH_TRIPS = "car_trips"
         private const val NOTE_ID = 7
         private const val ID_TRIP = 8
+        private const val ID_WEEK = 9
+        private const val ID_MONTH = 10
         private const val QUIET_MS = 3 * 60_000L
 
         fun start(context: Context) {
