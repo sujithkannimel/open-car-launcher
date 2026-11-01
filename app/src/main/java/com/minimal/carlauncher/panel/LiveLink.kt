@@ -69,6 +69,7 @@ object LiveLink {
         }
         val got = reply ?: return Result(null, 0)
         val ip = reached ?: return Result(null, 0)
+        AdbTunnel.update(got.adb, ip, key)
         synchronized(acked) { acked.removeAll(ack.toSet()) }
         com.minimal.carlauncher.core.PhoneMedia.onReply(got.np, cmd)
 

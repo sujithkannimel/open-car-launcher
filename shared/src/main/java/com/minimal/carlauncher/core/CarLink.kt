@@ -154,14 +154,16 @@ object CarLink {
     /** A launcher APK the phone has ready for the car (integrity: size + SHA-256, in the sealed reply). */
     data class Offer(val version: String, val size: Long, val sha256: String)
 
-    data class PhoneMsg(val fills: List<InboxFill>, val offer: Offer?, val np: NowPlaying? = null)
+    /** [adb]: the phone's ADB bridge is on - the car keeps a tunnel to its own adbd open. */
+    data class PhoneMsg(val fills: List<InboxFill>, val offer: Offer?, val np: NowPlaying? = null, val adb: Boolean = false)
 
     /** Phone -> car: fill-ups the car hasn't acknowledged yet, an update if the phone has one, what plays. */
-    fun phoneMessage(fills: List<InboxFill>, now: Long, offer: Offer? = null, np: NowPlaying? = null): String = JSONObject()
+    fun phoneMessage(fills: List<InboxFill>, now: Long, offer: Offer? = null, np: NowPlaying? = null, adb: Boolean = false): String = JSONObject()
         .put("k", "phone").put("t", now)
         .put("fills", JSONArray(fills.map { JSONObject(it.toJson()) }))
         .put("offer", offer?.let { JSONObject().put("ver", it.version).put("size", it.size).put("sha", it.sha256) } ?: JSONObject.NULL)
         .put("np", np?.let { npToJson(it) } ?: JSONObject.NULL)
+        .put("adb", adb)
         .toString()
 
     fun parsePhone(text: String, now: Long): PhoneMsg? = try {
@@ -171,6 +173,7 @@ object CarLink {
             o.optJSONArray("fills")?.let { a -> (0 until a.length()).mapNotNull { InboxFill.parse(a.getJSONObject(it).toString()) } }.orEmpty(),
             o.optJSONObject("offer")?.let { Offer(it.getString("ver"), it.getLong("size"), it.getString("sha")) },
             o.optJSONObject("np")?.let { npFromJson(it) },
+            o.optBoolean("adb", false),
         )
     } catch (_: Exception) {
         null
@@ -187,6 +190,21 @@ object CarLink {
     } catch (_: Exception) {
         null
     }
+
+    /**
+     * Car -> phone: a spare ADB tunnel. After this sealed line the car waits for one byte
+     * ([TUNNEL_GO]); then it connects to its own adbd and both sockets carry raw ADB traffic.
+     */
+    fun tunnelRequest(now: Long): String = JSONObject().put("k", "adbtunnel").put("t", now).toString()
+
+    fun isTunnelRequest(text: String, now: Long): Boolean = try {
+        val o = JSONObject(text)
+        o.optString("k") == "adbtunnel" && kotlin.math.abs(now - o.getLong("t")) <= MAX_AGE_MS
+    } catch (_: Exception) {
+        false
+    }
+
+    const val TUNNEL_GO = 0x47
 
     /** Lower-case hex SHA-256 of a file. */
     fun sha256(file: java.io.File): String {

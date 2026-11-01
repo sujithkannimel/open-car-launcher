@@ -138,13 +138,17 @@ class LinkService : Service() {
     @Volatile private var lastOfferNote = 0L
 
     private fun handle(s: Socket) {
-        s.use {
+        var keepOpen = false
+        try {
             try {
                 s.soTimeout = 5_000
                 val key = LinkStore.key(this) ?: return
                 val line = BufferedReader(InputStreamReader(s.getInputStream())).readLine() ?: return
                 val text = CarLink.open(key, line) ?: return
                 val now = System.currentTimeMillis()
+
+                // A spare ADB tunnel from the car: kept open for Termux's adb (bridge on only).
+                if (CarLink.isTunnelRequest(text, now)) { keepOpen = AdbBridge.offerSpare(s); return }
 
                 // Second connection: the car wants the launcher APK we offered.
                 CarLink.parseApkRequest(text, now)?.let { ver ->
@@ -178,7 +182,7 @@ class LinkService : Service() {
                 // The car's music buttons drive the phone's player; then report what plays.
                 msg.extra.cmd?.let { PhoneMedia.run(this, it) }
                 val np = if (LinkStore.mediaOn(this)) PhoneMedia.nowPlaying(this, msg.extra.npArtKey) else null
-                val reply = CarLink.seal(key, CarLink.phoneMessage(LinkStore.localFills(this), now, offer, np))
+                val reply = CarLink.seal(key, CarLink.phoneMessage(LinkStore.localFills(this), now, offer, np, AdbBridge.isOn(now)))
                 s.getOutputStream().apply { write((reply + "\n").toByteArray()); flush() }
                 LinkStore.saveLive(this, msg, s.inetAddress?.hostAddress.orEmpty())
                 main.post {
@@ -189,6 +193,8 @@ class LinkService : Service() {
             } catch (e: Exception) {
                 LinkStore.note(this, "link error: ${e.javaClass.simpleName}: ${e.message}")
             }
+        } finally {
+            if (!keepOpen) runCatching { s.close() }
         }
     }
 

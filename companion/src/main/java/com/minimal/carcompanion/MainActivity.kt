@@ -753,6 +753,25 @@ class MainActivity : Activity() {
             setTextColor(CYAN); textSize = 14f; setPadding(0, px(4), 0, px(8))
             setOnClickListener { showDiagnostics() }
         })
+        col.addView(TextView(this).apply {
+            fun label() = if (AdbBridge.isOn()) "ADB bridge: ON until " + timeFmt.format(Date(AdbBridge.until)) + " (tap to turn off)"
+                else "ADB bridge to the car (30 min)"
+            text = label()
+            setTextColor(CYAN); textSize = 14f; setPadding(0, px(4), 0, px(8))
+            setOnClickListener {
+                if (AdbBridge.isOn()) AdbBridge.turnOff(this@MainActivity) else {
+                    AdbBridge.turnOn(this@MainActivity)
+                    LinkService.start(this@MainActivity)
+                    AlertDialog.Builder(this@MainActivity, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                        .setTitle("ADB bridge on")
+                        .setMessage("In Termux:\n\nadb connect 127.0.0.1:${AdbBridge.PORT}\nadb -s 127.0.0.1:${AdbBridge.PORT} shell\n\n" +
+                            "Works on home Wi-Fi and during Android Auto, as long as the live link is up. " +
+                            "The car's Wi-Fi ADB (port 5555) must be on. Turns itself off after ${AdbBridge.ON_MINUTES} min.")
+                        .setPositiveButton("OK", null).show()
+                }
+                text = label()
+            }
+        })
         val mediaBox = android.widget.CheckBox(this).apply {
             text = "Show the phone's song on the car"
             isChecked = LinkStore.mediaOn(this@MainActivity)

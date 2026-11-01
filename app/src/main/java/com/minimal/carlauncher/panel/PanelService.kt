@@ -187,6 +187,7 @@ class PanelService : Service() {
 
         wm = getSystemService(WINDOW_SERVICE) as WindowManager
         am = getSystemService(AUDIO_SERVICE) as AudioManager
+        AdbTunnel.log = { msg -> handler.post { log(msg) } }
         dens = resources.displayMetrics.density
 
         registerScreenReceiver()

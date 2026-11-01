@@ -85,6 +85,15 @@ class CarLinkTest {
         assertEquals("k1", m.extra.npArtKey)
     }
 
+    @Test fun adbBridgeFlagAndTunnelRequest() {
+        val now = 1_800_000_000_000L
+        assertEquals(true, CarLink.parsePhone(CarLink.phoneMessage(emptyList(), now, adb = true), now)!!.adb)
+        assertEquals(false, CarLink.parsePhone(CarLink.phoneMessage(emptyList(), now), now)!!.adb)
+        assertEquals(true, CarLink.isTunnelRequest(CarLink.tunnelRequest(now), now))
+        assertEquals(false, CarLink.isTunnelRequest(CarLink.tunnelRequest(now), now + CarLink.MAX_AGE_MS + 1))
+        assertEquals(false, CarLink.isTunnelRequest(CarLink.apkRequest("0.4", now), now))
+    }
+
     @Test fun linkFileRoundTrip() {
         val k = CarLink.newKey()
         assertEquals(k, CarLink.parseLinkFile(CarLink.linkFile(k)))
