@@ -73,6 +73,7 @@ object Prefs {
     const val KEY_CUR_TRIP_HA = "pref_cur_trip_hard_accel"
     const val KEY_CUR_TRIP_HB = "pref_cur_trip_hard_brake"
     const val KEY_BATTERY_LOG = "pref_battery_log"
+    const val KEY_PERF_RUNS = "pref_perf_runs"
     const val KEY_WEATHER_JSON = "pref_weather_json"
     const val KEY_STAY_ON_CONNECT = "pref_stay_on_connect"
     const val KEY_USER_OPENED_ZLINK = "pref_user_opened_zlink_at"
@@ -455,6 +456,11 @@ object Prefs {
     var batteryLog: List<BatteryDay>
         get() = BatteryHealth.decode(sp.getString(KEY_BATTERY_LOG, null))
         set(value) = sp.edit().putString(KEY_BATTERY_LOG, BatteryHealth.encode(value)).apply()
+
+    /** Timed acceleration runs (0-60, 0-100, 40-80), newest last. */
+    var perfRuns: List<PerfRun>
+        get() = PerfTimer.decode(sp.getString(KEY_PERF_RUNS, null))
+        set(value) = sp.edit().putString(KEY_PERF_RUNS, PerfTimer.encode(value)).apply()
 
     /** Trip in progress as a record (for totals, fuel and the live display), or null. */
     fun liveTrip(now: Long): TripRecord? {

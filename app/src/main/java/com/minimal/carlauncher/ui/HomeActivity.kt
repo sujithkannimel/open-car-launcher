@@ -129,6 +129,12 @@ class HomeActivity : AppCompatActivity() {
             }
         }
         binding.gaugeClock.setOnClickListener { openClock() }
+        // Long-press the speed: timed acceleration runs.
+        binding.gaugeSpeed.setOnLongClickListener {
+            startActivity(android.content.Intent(this, TripsActivity::class.java)
+                .putExtra(TripsActivity.EXTRA_TAB, TripsActivity.TAB_PERF))
+            true
+        }
     }
 
     private fun bindDockActions() {
@@ -236,6 +242,24 @@ class HomeActivity : AppCompatActivity() {
 
     // ------------------------------------------------------------- dashboard render
 
+    private var perfShownUntil = 0L
+    private var statusColor = 0
+
+    /** Shows a just-timed run under the speed for 8 s ("0-100 km/h 9.8 s - NEW BEST"). */
+    private fun showPerf(run: com.minimal.carlauncher.core.PerfRun, best: Boolean) {
+        perfShownUntil = android.os.SystemClock.elapsedRealtime() + 8_000L
+        val st = binding.textSpeedStatus
+        if (statusColor == 0) statusColor = st.currentTextColor
+        st.text = String.format(java.util.Locale.US, "%s km/h  %.1f s%s", run.kind.replace("-", "\u2013"), run.sec,
+            if (best) "  \u00B7  NEW BEST" else "")
+        st.setTextColor(if (best) com.minimal.carlauncher.core.Neon.PINK else com.minimal.carlauncher.core.Neon.CYAN)
+        st.postDelayed({
+            if (android.os.SystemClock.elapsedRealtime() < perfShownUntil) return@postDelayed  // a newer run is showing
+            st.setTextColor(statusColor)
+            render(viewModel.vehicle.value)
+        }, 8_100L)
+    }
+
     /** Racing look: forward-leaning digits, neon seconds, glowing speed, segment bars. */
     private fun styleSporty() {
         val lean = -0.18f
@@ -267,7 +291,7 @@ class HomeActivity : AppCompatActivity() {
         binding.textSpeed.text = Format.speedText(unit, state.speedMps, state.hasFix)
         binding.speedBar.level = if (state.hasFix) state.speedMps * 3.6f / 160f else 0f
         binding.textSpeedUnit.text = Format.unitLabel(unit)
-        binding.textSpeedStatus.setText(
+        if (android.os.SystemClock.elapsedRealtime() >= perfShownUntil) binding.textSpeedStatus.setText(
             when {
                 !state.permissionGranted -> R.string.gps_permission_needed
                 !state.gpsEnabled -> R.string.gps_disabled
@@ -375,6 +399,7 @@ class HomeActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        com.minimal.carlauncher.core.PerfLive.listener = { run, best -> showPerf(run, best) }
         viewModel.start()
         map.onResume()
         app.radioRepository.start()
@@ -435,6 +460,7 @@ class HomeActivity : AppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
+        com.minimal.carlauncher.core.PerfLive.listener = null
         // Unregister the moment anything else comes to the foreground - this process is alive
         // for as long as the head unit is powered.
         viewModel.stop()

@@ -204,6 +204,18 @@ class LinkService : Service() {
                     "${volts(prev.resting)} yesterday, ${volts(last.resting)} this morning. Something may be draining it.")
             }
         }
+        data.battery.lastOrNull { it.crank > 0f }?.takeIf { it.day == todayDay() }?.let { d ->
+            if (BatteryHealth.crankBand(d.crank) >= BatteryHealth.Crank.WEAK)
+                alertOnce("crank:${d.day}", "Weak start this morning",
+                    "Voltage dipped to ${String.format(java.util.Locale.US, "%.1f V", d.crank)} while cranking. " +
+                        "A battery near the end of its life shows this first - get it tested.")
+        }
+        data.perf.lastOrNull()?.let { r ->
+            val pt = com.minimal.carlauncher.core.PerfTimer
+            if (System.currentTimeMillis() - r.at < 30 * 60_000L && pt.best(data.perf, r.kind) == r && data.perf.count { it.kind == r.kind } > 1)
+                alertOnce("perf:${r.at}", "New best ${r.kind.replace("-", "\u2013")} km/h",
+                    String.format(java.util.Locale.US, "%.1f s", r.sec))
+        }
     }
 
     private fun onCarQuiet() {

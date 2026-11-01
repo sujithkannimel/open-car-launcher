@@ -1262,7 +1262,7 @@ class PanelService : Service() {
         try {
             val m = getSystemService(android.location.LocationManager::class.java) ?: return
             m.requestLocationUpdates(
-                android.location.LocationManager.GPS_PROVIDER, 2000L, 0f, gpsListener, Looper.getMainLooper()
+                android.location.LocationManager.GPS_PROVIDER, 1000L, 0f, gpsListener, Looper.getMainLooper()
             )
             locMgr = m
         } catch (e: Exception) {
@@ -1285,7 +1285,11 @@ class PanelService : Service() {
         // Standing still only counts as idling while the engine runs (alternator charging);
         // with just the screen on (ACC) no fuel is used. No recent reading: count it.
         if (mps >= 1.5) tripDriveAcc += dt else if (engineMaybeRunning()) tripIdleAcc += dt
-        countHardEvents(p, l, dt)
+        // Hard events over ~2 s spans: 1 s GPS speed steps are too noisy on their own.
+        val ref = hardRef
+        if (ref == null || l.time - ref.time > 3_500L) hardRef = l
+        else if (l.time - ref.time >= 1_800L) { countHardEvents(ref, l, (l.time - ref.time) / 1000.0); hardRef = l }
+        if (l.hasSpeed() && l.accuracy <= 20f) perfTimer.feed(l.time, l.speed * 3.6f).forEach { onPerfRun(it) }
         // Just stopped: push to the phone now, so its "parked here" spot is where the car stands.
         if (mps >= 2.0) wasMoving = true
         else if (wasMoving && mps < 0.5) { wasMoving = false; handler.post { liveLinkTick() } }
@@ -1475,6 +1479,46 @@ class PanelService : Service() {
     // --------------------------------------------------------------------- battery health
 
     private var restingWindowOpen = false
+    /** Readings from ignition until the engine first charges: resting level, then the cranking dip. */
+    private val startSamples = ArrayList<Float>()
+    private var startPollUntil = 0L
+
+    /** Opens the start window and asks the MCU for the voltage twice a second for a minute. */
+    private fun openStartWindow() {
+        restingWindowOpen = true
+        seenChargingThisTrip = false
+        startSamples.clear()
+        startPollUntil = SystemClock.elapsedRealtime() + 60_000L
+        handler.removeCallbacks(startPoll)
+        handler.post(startPoll)
+    }
+
+    private val startPoll = object : Runnable {
+        override fun run() {
+            if (!restingWindowOpen) return
+            if (SystemClock.elapsedRealtime() - ignitionElapsed >= 180_000L) { closeStartWindow(); return }
+            if (SystemClock.elapsedRealtime() < startPollUntil) {
+                try { sendBroadcast(Intent(NWD_VOLT_QUERY_ACTION)) } catch (_: Exception) {}
+                handler.postDelayed(this, 500L)
+            } else handler.postDelayed(this, 30_000L)
+        }
+    }
+
+    /** Saves the resting voltage and, if one was caught, the cranking dip. */
+    private fun closeStartWindow() {
+        restingWindowOpen = false
+        handler.removeCallbacks(startPoll)
+        val bh = com.minimal.carlauncher.core.BatteryHealth
+        val (rest, crank) = bh.splitStart(startSamples)
+        val day = com.minimal.carlauncher.core.BackupStore.today()
+        var days = Prefs.batteryLog
+        rest?.let { days = bh.addResting(days, day, it) }
+        crank?.let { days = bh.addCrank(days, day, it) }
+        if (rest != null || crank != null) Prefs.batteryLog = days
+        log(String.format(Locale.US, "start: %d readings, resting %s, cranking dip %s", startSamples.size,
+            rest?.let { String.format(Locale.US, "%.2fV", it) } ?: "-", crank?.let { String.format(Locale.US, "%.1fV", it) } ?: "not caught"))
+        startSamples.clear()
+    }
     private var seenChargingThisTrip = false
     private var lowChargeCount = 0
     private var highChargeCount = 0
@@ -1495,10 +1539,9 @@ class PanelService : Service() {
         if (v >= bh.CHARGE_LOW) seenChargingThisTrip = true
         if (restingWindowOpen && ignitionElapsed > 0L && sinceIgnition < 180_000L &&
             !seenChargingThisTrip && v < bh.RESTING_MAX && !movingNow()) {
-            Prefs.batteryLog = bh.addResting(Prefs.batteryLog, day, v)
-            log(String.format(Locale.US, "resting voltage %.1fV", v))
+            startSamples += v
         }
-        if (sinceIgnition >= 180_000L || seenChargingThisTrip) restingWindowOpen = false
+        if (restingWindowOpen && (sinceIgnition >= 180_000L || seenChargingThisTrip)) closeStartWindow()
 
         if (movingNow()) {
             Prefs.batteryLog = bh.addCharging(Prefs.batteryLog, day, v)
@@ -1543,9 +1586,8 @@ class PanelService : Service() {
             Prefs.curTripHardBrake = 0
             tripDriveAcc = 0.0; tripIdleAcc = 0.0; tripMaxKmh = 0f; tripHwyAcc = 0.0
             hardAccelAcc = 0; hardBrakeAcc = 0
-            restingWindowOpen = true
-            seenChargingThisTrip = false
             ignitionElapsed = SystemClock.elapsedRealtime()
+            openStartWindow()
             guardBounces = 0
             log("ignition on (new trip) -- ZLink guard active")
         }
@@ -1666,6 +1708,19 @@ class PanelService : Service() {
     private var hardAccelAcc = 0
     private var hardBrakeAcc = 0
     private var lastHardAt = 0L
+    private var hardRef: android.location.Location? = null
+    private val perfTimer = com.minimal.carlauncher.core.PerfTimer()
+
+    /** A timed run finished: keep it and show it (the home screen if open, else a toast). */
+    private fun onPerfRun(r: com.minimal.carlauncher.core.PerfRun) {
+        val before = com.minimal.carlauncher.core.PerfTimer.best(Prefs.perfRuns, r.kind)
+        Prefs.perfRuns = com.minimal.carlauncher.core.PerfTimer.add(Prefs.perfRuns, r)
+        val best = before == null || r.sec < before.sec
+        log(String.format(Locale.US, "perf %s %.1fs%s", r.kind, r.sec, if (best) " best" else ""))
+        if (!com.minimal.carlauncher.core.PerfLive.post(r, best))
+            Toast.makeText(this, String.format(Locale.US, "%s km/h  %.1f s%s", r.kind, r.sec,
+                if (best) "  \u2014 new best!" else ""), Toast.LENGTH_SHORT).show()
+    }
 
     /**
      * Hard acceleration / braking from the change in GPS speed between two good fixes close in

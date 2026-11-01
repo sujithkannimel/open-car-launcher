@@ -41,6 +41,7 @@ class TripsActivity : AppCompatActivity() {
         const val TAB_FUEL = "fuel"
         const val TAB_TRIPS = "trips"
         const val TAB_BATTERY = "battery"
+        const val TAB_PERF = "perf"
 
         private val BG = Neon.BG
         private val CARD = Neon.SURFACE
@@ -51,6 +52,7 @@ class TripsActivity : AppCompatActivity() {
         private val GREEN = Color.rgb(74, 222, 128)
         private val AMBER = Color.rgb(251, 191, 36)
         private val RED = Color.rgb(244, 63, 94)
+        private val PINK = Neon.PINK
         private const val REQ_READ = 41
         private const val DIALOG = android.R.style.Theme_DeviceDefault_Dialog_Alert
     }
@@ -59,6 +61,7 @@ class TripsActivity : AppCompatActivity() {
     private lateinit var tabFuel: TextView
     private lateinit var tabTrips: TextView
     private lateinit var tabBattery: TextView
+    private lateinit var tabPerf: TextView
     private var tab = TAB_FUEL
     private val handler = Handler(Looper.getMainLooper())
     private val ticker = object : Runnable {
@@ -85,9 +88,11 @@ class TripsActivity : AppCompatActivity() {
         tabFuel = railButton("Fuel") { select(TAB_FUEL) }
         tabTrips = railButton("Trips") { select(TAB_TRIPS) }
         tabBattery = railButton("Battery") { select(TAB_BATTERY) }
-        rail.addView(tabFuel, LinearLayout.LayoutParams(px(130), px(56)).apply { bottomMargin = px(10) })
-        rail.addView(tabTrips, LinearLayout.LayoutParams(px(130), px(56)).apply { bottomMargin = px(10) })
-        rail.addView(tabBattery, LinearLayout.LayoutParams(px(130), px(56)))
+        tabPerf = railButton("0-100") { select(TAB_PERF) }
+        rail.addView(tabFuel, LinearLayout.LayoutParams(px(130), px(50)).apply { bottomMargin = px(8) })
+        rail.addView(tabTrips, LinearLayout.LayoutParams(px(130), px(50)).apply { bottomMargin = px(8) })
+        rail.addView(tabBattery, LinearLayout.LayoutParams(px(130), px(50)).apply { bottomMargin = px(8) })
+        rail.addView(tabPerf, LinearLayout.LayoutParams(px(130), px(50)))
         rail.addView(View(this), LinearLayout.LayoutParams(1, 0, 1f))
         rail.addView(railButton("Close") { finish() }, LinearLayout.LayoutParams(px(130), px(48)))
         root.addView(rail, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT))
@@ -122,6 +127,7 @@ class TripsActivity : AppCompatActivity() {
         styleRail(tabFuel, t == TAB_FUEL)
         styleRail(tabTrips, t == TAB_TRIPS)
         styleRail(tabBattery, t == TAB_BATTERY)
+        styleRail(tabPerf, t == TAB_PERF)
         render()
     }
 
@@ -130,6 +136,7 @@ class TripsActivity : AppCompatActivity() {
         when (tab) {
             TAB_FUEL -> renderFuel()
             TAB_BATTERY -> renderBattery()
+            TAB_PERF -> renderPerf()
             else -> renderTrips()
         }
     }
@@ -521,6 +528,30 @@ class TripsActivity : AppCompatActivity() {
         val trend = bh.trendPer30Days(days)
 
         content.addView(title("Battery"))
+        val verdict = bh.verdict(days)
+        val vColor = when (verdict.level) {
+            com.minimal.carlauncher.core.BatteryHealth.Level.GOOD -> GREEN
+            com.minimal.carlauncher.core.BatteryHealth.Level.WATCH -> AMBER
+            com.minimal.carlauncher.core.BatteryHealth.Level.REPLACE -> RED
+            com.minimal.carlauncher.core.BatteryHealth.Level.UNKNOWN -> TEXT
+        }
+        val lastCrank = days.lastOrNull { it.crank > 0f }
+        content.addView(statRow(listOf(
+            Stat(verdict.title, "OVERALL", vColor),
+            Stat(lastRest?.let { "${bh.chargePercent(it.resting)}%" } ?: "--", "CHARGE AT LAST START (APPROX)",
+                lastRest?.let { if (bh.chargePercent(it.resting) >= 60) GREEN else if (bh.chargePercent(it.resting) >= 35) AMBER else RED } ?: TEXT),
+            Stat(lastCrank?.let { String.format(Locale.US, "%.1f V", it.crank) } ?: "--",
+                "STARTING DIP (${lastCrank?.let { bh.crankBand(it.crank).label.substringBefore(" -").uppercase(Locale.US) } ?: "NOT CAUGHT YET"})",
+                when (lastCrank?.let { bh.crankBand(it.crank) }) {
+                    com.minimal.carlauncher.core.BatteryHealth.Crank.GOOD -> GREEN
+                    com.minimal.carlauncher.core.BatteryHealth.Crank.OK -> CYAN
+                    com.minimal.carlauncher.core.BatteryHealth.Crank.WEAK -> AMBER
+                    com.minimal.carlauncher.core.BatteryHealth.Crank.POOR -> RED
+                    null -> TEXT
+                }),
+        )))
+        if (verdict.reasons.isNotEmpty()) content.addView(body(verdict.reasons.joinToString("\n") { "\u2022 $it" }))
+        content.addView(View(this), LinearLayout.LayoutParams(1, px(10)))
         val band = lastRest?.let { bh.restingBand(it.resting) }
         val bandColor = when (band) {
             com.minimal.carlauncher.core.BatteryHealth.Rest.GOOD -> GREEN
@@ -552,6 +583,16 @@ class TripsActivity : AppCompatActivity() {
         content.addView(card(chart, px(140)))
         content.addView(body("Trend: " + bh.trendLabel(trend)))
 
+        content.addView(section("Starting dip (lowest while cranking)"))
+        val dip = KmplChartView(this).apply {
+            emptyText = "Appears after a start where the head unit is on before you crank (switch to ACC, wait for the screen, then start)"
+            valueFormat = "%.1f"; axisFormat = "%.1f"; minSpan = 1.0f
+            points = days.filter { it.crank > 0f }.takeLast(30).map { d ->
+                (bh.dayNumber(d.day)?.let { day.format(Date(it * 86_400_000L)) } ?: "") to d.crank
+            }
+        }
+        content.addView(card(dip, px(140)))
+
         content.addView(section("Charging while driving (daily average)"))
         val chg = KmplChartView(this).apply {
             emptyText = "Appears after driving with the engine running"
@@ -563,6 +604,31 @@ class TripsActivity : AppCompatActivity() {
         content.addView(card(chg, px(140)))
         content.addView(hint("Healthy: resting 12.4 V or more; charging 13.2 - 15.0 V. Read at the head unit's power wire, " +
             "about 0.1 - 0.2 V below the battery terminals. For the most telling resting value, check the first start of the day."))
+    }
+
+    // ================================================================== performance
+
+    private fun renderPerf() {
+        val pt = com.minimal.carlauncher.core.PerfTimer
+        val runs = Prefs.perfRuns
+        content.addView(title("Acceleration"))
+        content.addView(statRow(pt.KINDS.map { k ->
+            val b = pt.best(runs, k)
+            Stat(b?.let { String.format(Locale.US, "%.1f s", it.sec) } ?: "--", "BEST ${k.replace("-", "\u2013")} KM/H",
+                if (b != null) PINK else TEXT)
+        }))
+        content.addView(section("Recent runs"))
+        if (runs.isEmpty()) content.addView(body("No runs yet. Timing is automatic: pull away from a stop, or accelerate " +
+            "through 40 km/h, and the time to 60, 100 or 80 km/h is saved."))
+        val fmt = SimpleDateFormat("d MMM, HH:mm", Locale.US)
+        runs.takeLast(15).reversed().forEach { r ->
+            val best = pt.best(runs, r.kind) == r
+            content.addView(body(String.format(Locale.US, "%s   %s km/h   %.1f s%s", fmt.format(Date(r.at)),
+                r.kind.replace("-", "\u2013"), r.sec, if (best) "   \u2605 best" else "")).apply { if (best) setTextColor(PINK) })
+        }
+        content.addView(hint("Timed from GPS once a second, interpolated: about \u00B10.3 s. A run is dropped if you lift off, " +
+            "lose GPS, or it takes longer than 30 s (20 s for 40\u201380). Only on an empty, safe road - never race on public roads. " +
+            "Tip: long-press the speed on the home screen to open this page."))
     }
 
     private fun totalStat(t: com.minimal.carlauncher.core.TripTotals, label: String) =

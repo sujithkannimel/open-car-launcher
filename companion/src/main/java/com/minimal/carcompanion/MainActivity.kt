@@ -507,6 +507,21 @@ class MainActivity : Activity() {
         content.addView(compareCard("This month", com.minimal.carlauncher.core.Summaries.of(d.trips, mo, Long.MAX_VALUE, lit),
             "last month", com.minimal.carlauncher.core.Summaries.of(d.trips, lastMo, mo, lit)), lp(bottom = 10))
 
+        // Best acceleration times, timed automatically by the car.
+        if (d.perf.isNotEmpty()) {
+            val pt = com.minimal.carlauncher.core.PerfTimer
+            content.addView(section("Acceleration (best)"))
+            grid(pt.KINDS.map { k ->
+                val b = pt.best(d.perf, k)
+                Stat(b?.let { String.format(Locale.US, "%.1f s", it.sec) } ?: "--", k.replace("-", "\u2013") + " km/h",
+                    if (b != null) Neon.PINK else TEXT)
+            })
+            d.perf.lastOrNull()?.let { r ->
+                content.addView(hint(String.format(Locale.US, "Last run: %s km/h in %.1f s, %s", r.kind.replace("-", "\u2013"), r.sec,
+                    java.text.SimpleDateFormat("d MMM HH:mm", Locale.US).format(Date(r.at)))))
+            }
+        }
+
         content.addView(section("Trips"))
         if (d.trips.isEmpty()) { content.addView(body("No finished trips yet.")); return }
         var lastDay = ""
@@ -631,6 +646,21 @@ class MainActivity : Activity() {
         val band = restDay?.let { BatteryHealth.restingBand(it.resting) }
         val ok = chargeDay?.let { it.chargeAvg >= BatteryHealth.CHARGE_LOW && it.chargeMax <= BatteryHealth.CHARGE_HIGH }
         content.addView(section("Battery", top = 4))
+        val verdict = BatteryHealth.verdict(d.battery)
+        val crankDay = d.battery.lastOrNull { it.crank > 0f }
+        grid(listOf(
+            Stat(verdict.title, "Overall", when (verdict.level) {
+                BatteryHealth.Level.GOOD -> GREEN; BatteryHealth.Level.WATCH -> AMBER
+                BatteryHealth.Level.REPLACE -> RED; BatteryHealth.Level.UNKNOWN -> TEXT }),
+            Stat(restDay?.let { "${BatteryHealth.chargePercent(it.resting)}%" } ?: "--", "Charge at last start (approx)",
+                restDay?.let { val c = BatteryHealth.chargePercent(it.resting); if (c >= 60) GREEN else if (c >= 35) AMBER else RED } ?: TEXT),
+            Stat(crankDay?.let { String.format(Locale.US, "%.1f V", it.crank) } ?: "--",
+                "Starting dip · " + (crankDay?.let { BatteryHealth.crankBand(it.crank).label.substringBefore(" -") } ?: "not caught yet"),
+                when (crankDay?.let { BatteryHealth.crankBand(it.crank) }) {
+                    BatteryHealth.Crank.GOOD -> GREEN; BatteryHealth.Crank.OK -> CYAN
+                    BatteryHealth.Crank.WEAK -> AMBER; BatteryHealth.Crank.POOR -> RED; null -> TEXT }),
+        ))
+        verdict.reasons.forEach { content.addView(body("\u2022 $it")) }
         grid(listOf(
             Stat(if (d.lastVoltage > 0) String.format(Locale.US, "%.1f V", d.lastVoltage) else "--", "Last reading", CYAN),
             Stat(restDay?.let { String.format(Locale.US, "%.2f V", it.resting) } ?: "--",
@@ -646,6 +676,12 @@ class MainActivity : Activity() {
             emptyText = "Appears after a start with the engine not yet running"
             valueFormat = "%.2f"; axisFormat = "%.1f"; minSpan = 0.6f
             points = d.battery.filter { it.resting > 0f }.takeLast(30).map { dayLabel(it.day) to it.resting }
+        }))
+        content.addView(section("Starting dip (lowest while cranking)"))
+        content.addView(chartCard(ChartView(this).apply {
+            emptyText = "Appears after a start where the head unit is on before you crank"
+            valueFormat = "%.1f"; axisFormat = "%.1f"; minSpan = 1f
+            points = d.battery.filter { it.crank > 0f }.takeLast(30).map { dayLabel(it.day) to it.crank }
         }))
         content.addView(section("Charging while driving (daily average)"))
         content.addView(chartCard(ChartView(this).apply {

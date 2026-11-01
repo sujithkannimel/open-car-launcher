@@ -28,6 +28,8 @@ class CarData(
     val lastVoltage: Float,
     /** The raw fuel log, for merging pending phone entries. */
     val fuelEvents: List<com.minimal.carlauncher.core.FuelEvent> = emptyList(),
+    /** Timed acceleration runs from the car. */
+    val perf: List<com.minimal.carlauncher.core.PerfRun> = emptyList(),
 ) {
     val tank get() = fuel.state.tankL
     val configured get() = fuel.state.configured
@@ -43,7 +45,7 @@ class CarData(
     fun withLive(trip: TripRecord?, voltage: Float): CarData {
         val t = if (trip != null && TripLog.worthKeeping(trip)) trips + trip else trips
         return CarData(createdMs, sourceName, t, fuel, FuelModel.compute(fuel, t, gpsKm, createdMs), battery, gpsKm,
-            if (voltage > 0f) voltage else lastVoltage, fuelEvents).also { it.live = true; it.pending = pending }
+            if (voltage > 0f) voltage else lastVoltage, fuelEvents, perf).also { it.live = true; it.pending = pending }
     }
 
     /** Same data with the phone's pending fill-ups applied, so the phone shows them at once. */
@@ -52,7 +54,7 @@ class CarData(
         val merged = FuelInbox.merge(events, fills, gpsKm).events
         val f = FuelEstimator.replay(merged)
         return CarData(createdMs, sourceName, trips, f, FuelModel.compute(f, trips, gpsKm, createdMs),
-            battery, gpsKm, lastVoltage, merged).also { it.pending = fills; it.live = live }
+            battery, gpsKm, lastVoltage, merged, perf).also { it.pending = fills; it.live = live }
     }
 
     companion object {
@@ -78,6 +80,7 @@ class CarData(
                     gpsKm = gps,
                     lastVoltage = prefs.optJSONObject("pref_last_voltage")?.optDouble("v", -1.0)?.toFloat() ?: -1f,
                     fuelEvents = events,
+                    perf = com.minimal.carlauncher.core.PerfTimer.decode(str("pref_perf_runs")),
                 )
             }
         } catch (_: Exception) {
