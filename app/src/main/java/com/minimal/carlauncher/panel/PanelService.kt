@@ -990,6 +990,8 @@ class PanelService : Service() {
         }
     }
 
+    private fun currentVolts(): Float? = volts.display().removeSuffix("V").toFloatOrNull()
+
     /** 0 none, 1 charging, 2 normal, 3 low, 4 critical. */
     private fun classify(v: Float?): Int = when {
         v == null -> BATT_NONE
