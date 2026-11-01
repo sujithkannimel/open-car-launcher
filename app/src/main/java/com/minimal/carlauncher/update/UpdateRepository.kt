@@ -141,6 +141,16 @@ class UpdateRepository(
         }
     }
 
+    /** A launcher APK delivered over the live link from the phone app: ready to install. */
+    fun offerDownloaded(tag: String, apk: java.io.File) {
+        if (!SemVer.isNewer(tag, BuildConfig.VERSION_NAME)) return
+        Prefs.cachedLatestTag = tag
+        Prefs.cachedLatestUrl = ""
+        Prefs.pendingApkPath = apk.absolutePath
+        _state.value = UpdateState.ReadyToInstall(ReleaseInfo(tag, tag, "Received from your phone", "", "", apk.length()), apk)
+        _badgeVisible.value = true
+    }
+
     fun cancelDownload() {
         downloadJob?.cancel()
         downloadJob = null

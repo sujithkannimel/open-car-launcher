@@ -42,4 +42,18 @@ class CompanionUpdateTest {
         assertNull(CompanionUpdate.newest(json, "1.2"))
         assertNull(CompanionUpdate.newest("not json", "1.0"))
     }
+
+    @Test fun findsNewestLauncherForTheCar() {
+        val json = "[" + listOf(
+            release("v0.37", "car-launcher-v0.37-release.apk", "car-companion-1.6.apk"),
+            release("v0.36", "car-launcher-v0.36-release.apk"),
+            release("v0.24", "car-launcher-v0.24-debug.apk"),
+        ).joinToString(",") + "]"
+        val u = CompanionUpdate.newestLauncher(json, "0.36")!!
+        assertEquals("0.37", u.version)
+        assertTrue(u.url.endsWith("car-launcher-v0.37-release.apk"))
+        assertNull(CompanionUpdate.newestLauncher(json, "0.37"))
+        assertEquals("0.24", CompanionUpdate.launcherVersionOf("car-launcher-v0.24-debug.apk"))
+        assertNull(CompanionUpdate.launcherVersionOf("car-companion-1.6.apk"))
+    }
 }

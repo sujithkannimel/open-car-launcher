@@ -249,6 +249,93 @@ class MainActivity : Activity() {
         }.start()
     }
 
+    // ================================================================ live-link extras
+
+    /** Where the car is / was parked, from the last position it sent over the live link. */
+    private fun parkedCard(): View? {
+        val p = LinkStore.pos(this) ?: return null
+        val live = System.currentTimeMillis() - LinkStore.liveAt(this) < 3 * 60_000L
+        val box = cardBox().apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        col.addView(label(if (live) "Car is here now" else "Where you parked"))
+        col.addView(TextView(this).apply {
+            text = (if (live) "Updated " else "Parked ") + timeFmt.format(Date(p.at)) +
+                (if (System.currentTimeMillis() - p.at > 20 * 3600_000L) ", " + dayFmt.format(Date(p.at)) else "")
+            setTextColor(TEXT); textSize = 17f; typeface = Typeface.DEFAULT_BOLD
+        })
+        box.addView(col, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        box.addView(button("Map") {
+            try { startActivity(Intent(Intent.ACTION_VIEW, LinkStore.mapUri(p))) }
+            catch (_: Exception) { Toast.makeText(this, "No maps app", Toast.LENGTH_LONG).show() }
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, px(44)))
+        return box
+    }
+
+    /**
+     * A newer head-unit launcher than the car runs (car version from the live link): download it
+     * on the phone and the car fetches it over the link next time it connects.
+     */
+    private fun headUnitUpdateBanner(): View? {
+        val carVer = LinkStore.carVersion(this).ifEmpty { return null }
+        val json = prefs.getString("updJson", null) ?: return null
+        val newest = CompanionUpdate.newestLauncher(json, carVer) ?: return null
+        val ready = LinkStore.offer(this)?.first?.version == newest.version
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = rounded(Color.argb(38, 139, 92, 246), radius = 20)
+            setPadding(px(16), px(14), px(16), px(14))
+        }
+        box.addView(TextView(this).apply {
+            text = "Head unit update: ${newest.version} (car has $carVer)"
+            setTextColor(TEXT); textSize = 15f; typeface = Typeface.DEFAULT_BOLD
+        })
+        box.addView(TextView(this).apply {
+            text = if (ready) "Ready on this phone. The car picks it up by itself next time you're in it, then install from About when parked."
+            else "Download it to this phone (about 20 MB); the car gets it straight from the phone, no Wi-Fi needed in the car."
+            setTextColor(DIM); textSize = 13f; setPadding(0, px(4), 0, px(8))
+        })
+        if (!ready) box.addView(button("Download for the car", R.drawable.ic_download) { downloadForCar(newest) },
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, px(44)))
+        return box
+    }
+
+    private fun downloadForCar(u: CompanionUpdate.Available) {
+        Toast.makeText(this, "Downloading ${u.version}...", Toast.LENGTH_SHORT).show()
+        Thread {
+            val f = LinkStore.launcherFile(this)
+            val tmp = java.io.File(f.path + ".part")
+            val ok = try {
+                val c = (java.net.URL(u.url).openConnection() as java.net.HttpURLConnection).apply {
+                    connectTimeout = 15_000; readTimeout = 60_000; instanceFollowRedirects = true
+                    setRequestProperty("User-Agent", "CarCompanion")
+                }
+                try {
+                    if (c.responseCode != 200) false
+                    else { c.inputStream.use { inp -> tmp.outputStream().use { inp.copyTo(it, 64 * 1024) } }; true }
+                } finally { c.disconnect() }
+            } catch (_: Exception) { false }
+            if (ok && tmp.length() > 100_000) {
+                f.delete(); tmp.renameTo(f)
+                LinkStore.setOffer(this, u.version, f.length(), com.minimal.carlauncher.core.CarLink.sha256(f))
+            } else tmp.delete()
+            runOnUiThread {
+                Toast.makeText(this, if (ok) "Ready. The car takes it next time it connects." else "Download failed. Try again on Wi-Fi.", Toast.LENGTH_LONG).show()
+                render()
+            }
+        }.start()
+    }
+
+    private fun showDiagnostics() {
+        val text = LinkStore.diag(this).ifEmpty { "Nothing yet. It appears after the car has connected over the live link." }
+        val at = LinkStore.liveAt(this)
+        AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle("Head unit diagnostics")
+            .setMessage((if (at > 0) "From the car at " + timeFmt.format(Date(at)) + "\n\n" else "") + text)
+            .setPositiveButton("OK", null)
+            .show()
+            .findViewById<TextView>(android.R.id.message)?.apply { typeface = Typeface.MONOSPACE; textSize = 12f }
+    }
+
     private fun openUpdate(u: CompanionUpdate.Available) {
         try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(u.url))) }
         catch (_: Exception) { Toast.makeText(this, "No browser to download the update", Toast.LENGTH_LONG).show() }
@@ -283,6 +370,7 @@ class MainActivity : Activity() {
             }
         } else { spin?.cancel(); refreshIcon.rotation = 0f }
         update?.let { u -> content.addView(updateBanner(u), lp(bottom = 12)) }
+        headUnitUpdateBanner()?.let { content.addView(it, lp(bottom = 12)) }
         if (d == null) {
             content.addView(body(if (token.isEmpty())
                 "Tap the settings button and enter your private repo and GitHub token."
@@ -322,6 +410,7 @@ class MainActivity : Activity() {
             if (d.pending.isNotEmpty()) hero.addView(small("Includes ${d.pending.size} fill-up(s) from this phone, waiting for the car to sync."))
         }
         content.addView(hero, lp(bottom = 12))
+        parkedCard()?.let { content.addView(it, lp(bottom = 12)) }
 
         val refuel = FuelModel.refuelBy(range, m.dailyKm, d.createdMs)
         val restDay = d.battery.lastOrNull { it.resting > 0f }
@@ -567,6 +656,11 @@ class MainActivity : Activity() {
             text = "Car Companion $myVersion  \u00B7  Check for updates"
             setTextColor(CYAN); textSize = 14f; setPadding(0, px(16), 0, px(8))
             setOnClickListener { checkForUpdate(force = true) }
+        })
+        col.addView(TextView(this).apply {
+            text = "Head unit diagnostics"
+            setTextColor(CYAN); textSize = 14f; setPadding(0, px(4), 0, px(8))
+            setOnClickListener { showDiagnostics() }
         })
         val linkBox = android.widget.CheckBox(this).apply {
             text = "Live link with the car (no internet needed)"

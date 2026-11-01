@@ -1269,6 +1269,9 @@ class PanelService : Service() {
         // Standing still only counts as idling while the engine runs (alternator charging);
         // with just the screen on (ACC) no fuel is used. No recent reading: count it.
         if (mps >= 1.5) tripDriveAcc += dt else if (engineMaybeRunning()) tripIdleAcc += dt
+        // Just stopped: push to the phone now, so its "parked here" spot is where the car stands.
+        if (mps >= 2.0) wasMoving = true
+        else if (wasMoving && mps < 0.5) { wasMoving = false; handler.post { liveLinkTick() } }
         if (l.hasSpeed() && l.speed < 70f) tripMaxKmh = maxOf(tripMaxKmh, l.speed * 3.6f)
         flushTripStats(force = false)
         if (d < 5.0 || (l.hasSpeed() && l.speed < 1f && d < 30.0)) return   // parked jitter
@@ -1540,7 +1543,7 @@ class PanelService : Service() {
 
     /** Pushes live data straight to the phone app (no internet needed) and takes its fill-ups. */
     private fun liveLinkTick() {
-        LiveLink.tick { r ->
+        LiveLink.tick(this, { linkExtra() }) { r ->
             val up = r.reached != null
             if (up != linkWasUp) { linkWasUp = up; log(if (up) "live link: phone at ${r.reached}" else "live link: phone not reachable") }
             if (r.added > 0) handler.post {
@@ -1548,7 +1551,35 @@ class PanelService : Service() {
                 updateFuelDisplay()
                 Toast.makeText(this, "Fill-up from your phone added to the fuel log", Toast.LENGTH_LONG).show()
             }
+            r.update?.let { (tag, file) ->
+                log("live link: launcher $tag received from the phone")
+                handler.post {
+                    (application as? com.minimal.carlauncher.CarLauncherApp)?.updateRepository?.offerDownloaded(tag, file)
+                    Toast.makeText(this, "Launcher $tag received from your phone. Install it from About when parked.", Toast.LENGTH_LONG).show()
+                }
+            }
         }
+    }
+
+    /** Charge alert, position and a diagnostics snapshot for the phone app. */
+    private fun linkExtra(): com.minimal.carlauncher.core.CarLink.CarExtra {
+        val fix = lastFix
+        val diag = buildString {
+            appendLine("Launcher ${com.minimal.carlauncher.BuildConfig.VERSION_NAME}")
+            appendLine("Voltage ${canVolts ?: "--"} V   charge alert $chargeAlert")
+            appendLine("App in front: ${currentTopApp() ?: "-"}")
+            appendLine("Cloud: ${Prefs.cloudStatus.ifEmpty { "-" }}")
+            appendLine("Phone link: ${Prefs.linkPhone.ifEmpty { "-" }}")
+            appendLine("GPS: ${if (fix == null) "no fix" else String.format(Locale.US, "±%.0f m", fix.accuracy)}")
+            appendLine()
+            append(getSharedPreferences("panel_log", Context.MODE_PRIVATE).getString("log", "") ?: "")
+        }
+        return com.minimal.carlauncher.core.CarLink.CarExtra(
+            appVersion = com.minimal.carlauncher.BuildConfig.VERSION_NAME,
+            chargeAlert = chargeAlert,
+            pos = fix?.let { com.minimal.carlauncher.core.CarLink.Pos(it.latitude, it.longitude, it.time, if (it.hasSpeed()) it.speed else 0f) },
+            diag = diag,
+        )
     }
 
     @Volatile private var cloudBusy = false
@@ -1607,6 +1638,7 @@ class PanelService : Service() {
     }
 
     @Volatile private var lastVoltAt = 0L
+    private var wasMoving = false
 
     /** False only when a fresh voltage reading says the alternator is not charging. */
     private fun engineMaybeRunning(): Boolean {

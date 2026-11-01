@@ -27,6 +27,32 @@ object CompanionUpdate {
         return 0
     }
 
+    private val LAUNCHER = Regex("""^car-launcher-v?(\d+(?:\.\d+)*)(?:-release|-debug)?\.apk$""", RegexOption.IGNORE_CASE)
+
+    /** Version in a head-unit launcher asset name ("car-launcher-v0.37-release.apk"), or null. */
+    fun launcherVersionOf(assetName: String): String? = LAUNCHER.find(assetName.trim())?.groupValues?.get(1)
+
+    /** The newest head-unit launcher APK newer than [current] (the car's version), for sending over the live link. */
+    fun newestLauncher(releasesJson: String, current: String): Available? = try {
+        val arr = JSONArray(releasesJson)
+        var best: Available? = null
+        for (i in 0 until arr.length()) {
+            val rel = arr.optJSONObject(i) ?: continue
+            if (rel.optBoolean("draft", false)) continue
+            val assets = rel.optJSONArray("assets") ?: continue
+            for (j in 0 until assets.length()) {
+                val a = assets.optJSONObject(j) ?: continue
+                val v = launcherVersionOf(a.optString("name")) ?: continue
+                val url = a.optString("browser_download_url").takeIf { it.startsWith("https://") } ?: continue
+                if (compare(v, current) <= 0) continue
+                if (best == null || compare(v, best.version) > 0) best = Available(v, url, rel.optString("tag_name"))
+            }
+        }
+        best
+    } catch (_: Exception) {
+        null
+    }
+
     /** The newest companion APK in a GitHub releases list that is newer than [current]. */
     fun newest(releasesJson: String, current: String): Available? = try {
         val arr = JSONArray(releasesJson)

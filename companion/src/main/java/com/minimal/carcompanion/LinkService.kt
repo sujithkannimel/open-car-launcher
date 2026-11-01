@@ -9,15 +9,20 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import com.minimal.carlauncher.core.BatteryHealth
 import com.minimal.carlauncher.core.CarLink
+import com.minimal.carlauncher.core.FuelModel
 import com.minimal.carlauncher.core.InboxFill
 import com.minimal.carlauncher.core.TripLog
+import com.minimal.carlauncher.core.TripRecord
 import org.json.JSONArray
 import java.io.BufferedReader
+import java.io.File
 import java.io.InputStreamReader
 import java.net.InetSocketAddress
 import java.net.ServerSocket
@@ -30,13 +35,17 @@ import java.util.concurrent.CopyOnWriteArrayList
 /**
  * Phone side of the live link. Listens on [CarLink.PORT]; the car connects every ~30 s while
  * it is on the same network (home Wi-Fi, or the Android Auto link), sends its data and gets
- * back any fill-ups logged on this phone. Messages that don't decrypt with the car's key are
- * dropped without a reply.
+ * back fill-ups logged on this phone and, if the phone has one ready, a newer launcher.
+ * Messages that don't decrypt with the car's key are dropped without a reply.
+ *
+ * From what arrives it also raises car alerts, a trip summary with the parking spot when the
+ * car goes quiet, and keeps the car's diagnostics for the app.
  */
 class LinkService : Service() {
 
     @Volatile private var server: ServerSocket? = null
     private val main = Handler(Looper.getMainLooper())
+    private val tripEnd = Runnable { onCarQuiet() }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -49,6 +58,7 @@ class LinkService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
 
     override fun onDestroy() {
+        main.removeCallbacks(tripEnd)
         runCatching { server?.close() }
         server = null
         super.onDestroy()
@@ -75,41 +85,152 @@ class LinkService : Service() {
                 val line = BufferedReader(InputStreamReader(s.getInputStream())).readLine() ?: return
                 val text = CarLink.open(key, line) ?: return
                 val now = System.currentTimeMillis()
+
+                // Second connection: the car wants the launcher APK we offered.
+                CarLink.parseApkRequest(text, now)?.let { ver ->
+                    val offer = LinkStore.offer(this) ?: return
+                    if (offer.first.version != ver) return
+                    s.soTimeout = 30_000
+                    s.getOutputStream().use { out -> offer.second.inputStream().use { it.copyTo(out, 64 * 1024) } }
+                    return
+                }
+
                 val msg = CarLink.parseCar(text, now) ?: return
                 LinkStore.removeLocalFills(this, msg.acked)
-                val reply = CarLink.seal(key, CarLink.phoneMessage(LinkStore.localFills(this), now))
+                val offer = LinkStore.offerFor(this, msg.extra.appVersion)
+                val reply = CarLink.seal(key, CarLink.phoneMessage(LinkStore.localFills(this), now, offer))
                 s.getOutputStream().apply { write((reply + "\n").toByteArray()); flush() }
                 LinkStore.saveLive(this, msg, s.inetAddress?.hostAddress.orEmpty())
                 main.post {
                     startForegroundNow(getString(R.string.link_live, SimpleDateFormat("h:mm a", Locale.US).format(Date(now))))
                     LinkStore.notifyListeners()
+                    onCarMessage(msg)
                 }
             } catch (_: Exception) {}
         }
     }
 
-    private fun startForegroundNow(text: String) {
-        val nm = getSystemService(NotificationManager::class.java)
-        if (nm.getNotificationChannel(CHANNEL) == null) {
-            nm.createNotificationChannel(NotificationChannel(CHANNEL, getString(R.string.link_channel),
-                NotificationManager.IMPORTANCE_MIN).apply { setShowBadge(false) })
+    // ------------------------------------------------------------------ alerts and trip summary
+
+    private fun onCarMessage(msg: CarLink.CarMsg) {
+        // The car stopped talking for 3 minutes: it was switched off (or left the phone behind).
+        main.removeCallbacks(tripEnd)
+        main.postDelayed(tripEnd, QUIET_MS)
+
+        val trip = msg.live
+        when (msg.extra.chargeAlert) {
+            1 -> alertOnce("charge1:${trip?.start}", "Battery not charging",
+                "The alternator isn't charging while driving (${volts(msg.voltage)}). Get the charging system checked.")
+            2 -> alertOnce("charge2:${trip?.start}", "Battery overcharging",
+                "Charging voltage is too high (${volts(msg.voltage)}). Get the charging system checked.")
         }
-        val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        val n = Notification.Builder(this, CHANNEL)
+
+        val data = LinkStore.cached(this) ?: return
+        val range = data.model.rangeKm
+        when (FuelModel.level(range)) {
+            4 -> alertOnce("fuel4:${today()}", "Fuel very low", "About $range km left. Refuel soon.")
+            3 -> alertOnce("fuel3:${today()}", "Fuel low", "About $range km left.")
+        }
+
+        val days = data.battery.filter { it.resting > 0f }
+        val last = days.lastOrNull()
+        if (last != null && last.day == todayDay()) {
+            val prev = days.dropLast(1).lastOrNull()
+            when {
+                BatteryHealth.restingBand(last.resting) >= BatteryHealth.Rest.WEAK -> alertOnce("bat:${last.day}", "Battery weak this morning",
+                    "It read ${volts(last.resting)} before starting. Get it tested before it fails to start.")
+                prev != null && prev.resting - last.resting >= 0.3f -> alertOnce("batdrop:${last.day}", "Battery dropped overnight",
+                    "${volts(prev.resting)} yesterday, ${volts(last.resting)} this morning. Something may be draining it.")
+            }
+        }
+    }
+
+    private fun onCarQuiet() {
+        val trip = LinkStore.lastLiveTrip(this) ?: return
+        if (trip.isParked && trip.idleSec < TripLog.PARKED_MIN_IDLE_SEC) return
+        if (!TripLog.worthKeeping(trip)) return
+        val sp = getSharedPreferences("companion", Context.MODE_PRIVATE)
+        if (sp.getLong("summaryFor", 0L) == trip.start) return
+        sp.edit().putLong("summaryFor", trip.start).apply()
+
+        val m = LinkStore.cached(this)?.model
+        val litres = if (m != null) FuelModel.tripLitres(trip, m.kmplCity, m.kmplHwy, m.recentHwyShare) else -1f
+        val text = if (trip.isParked) {
+            String.format(Locale.US, "Parked with the engine running: %s (≈%.1f L)", dur(trip.idleSec), FuelModel.idleLitres(trip.idleSec))
+        } else buildString {
+            append(String.format(Locale.US, "%.1f km · %s", trip.km, dur(trip.durationSec)))
+            if (litres > 0f) append(String.format(Locale.US, " · ≈%.1f L", litres))
+            if (trip.idleSec >= 60) append(" · idled ${dur(trip.idleSec)}")
+        }
+        val pos = LinkStore.pos(this)
+        val b = Notification.Builder(this, ensureChannel(CH_TRIPS, R.string.ch_trips, NotificationManager.IMPORTANCE_DEFAULT))
+            .setSmallIcon(R.drawable.ic_link)
+            .setContentTitle(if (trip.isParked) "Engine was running while parked" else "Trip done")
+            .setContentText(text + if (pos != null) " · Tap for where you parked" else "")
+            .setStyle(Notification.BigTextStyle().bigText(text + if (pos != null) "\nParked at " + time(pos.at) else ""))
+            .setContentIntent(openApp())
+            .setAutoCancel(true)
+        if (pos != null) b.addAction(Notification.Action.Builder(null, "Where I parked", mapIntent(pos)).build())
+        getSystemService(NotificationManager::class.java).notify(ID_TRIP, b.build())
+    }
+
+    private fun alertOnce(key: String, title: String, text: String) {
+        val sp = getSharedPreferences("companion", Context.MODE_PRIVATE)
+        val seen = sp.getStringSet("alertsSent", emptySet()) ?: emptySet()
+        if (key in seen) return
+        sp.edit().putStringSet("alertsSent", (seen + key).toList().takeLast(60).toSet()).apply()
+        val n = Notification.Builder(this, ensureChannel(CH_ALERTS, R.string.ch_alerts, NotificationManager.IMPORTANCE_HIGH))
+            .setSmallIcon(R.drawable.ic_link)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(Notification.BigTextStyle().bigText(text))
+            .setContentIntent(openApp())
+            .setAutoCancel(true)
+            .build()
+        getSystemService(NotificationManager::class.java).notify(key.hashCode(), n)
+    }
+
+    private fun openApp(): PendingIntent = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java),
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+
+    private fun mapIntent(p: CarLink.Pos): PendingIntent = PendingIntent.getActivity(this, 1,
+        Intent(Intent.ACTION_VIEW, LinkStore.mapUri(p)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+
+    private fun ensureChannel(id: String, nameRes: Int, importance: Int): String {
+        val nm = getSystemService(NotificationManager::class.java)
+        if (nm.getNotificationChannel(id) == null) nm.createNotificationChannel(NotificationChannel(id, getString(nameRes), importance))
+        return id
+    }
+
+    private fun startForegroundNow(text: String) {
+        val n = Notification.Builder(this, ensureChannel(CH_LINK, R.string.link_channel, NotificationManager.IMPORTANCE_MIN))
             .setSmallIcon(R.drawable.ic_link)
             .setContentTitle(getString(R.string.link_title))
             .setContentText(text)
-            .setContentIntent(open)
+            .setContentIntent(openApp())
             .setOngoing(true)
             .build()
         if (Build.VERSION.SDK_INT >= 29) startForeground(NOTE_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
         else startForeground(NOTE_ID, n)
     }
 
+    private fun volts(v: Float) = String.format(Locale.US, "%.1f V", v)
+    private fun time(ms: Long) = SimpleDateFormat("h:mm a", Locale.US).format(Date(ms))
+    private fun today() = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+    private fun todayDay() = today()
+    private fun dur(sec: Long): String {
+        val m = (sec / 60).coerceAtLeast(0)
+        return if (m < 60) "$m min" else String.format(Locale.US, "%dh %02dm", m / 60, m % 60)
+    }
+
     companion object {
-        private const val CHANNEL = "car_link"
+        private const val CH_LINK = "car_link"
+        private const val CH_ALERTS = "car_alerts"
+        private const val CH_TRIPS = "car_trips"
         private const val NOTE_ID = 7
+        private const val ID_TRIP = 8
+        private const val QUIET_MS = 3 * 60_000L
 
         fun start(context: Context) {
             if (LinkStore.key(context) == null || !LinkStore.enabled(context)) return
@@ -144,17 +265,31 @@ object LinkStore {
     fun setEnabled(c: Context, on: Boolean) = sp(c).edit().putBoolean("linkOn", on).apply()
 
     fun liveAt(c: Context) = sp(c).getLong("liveAt", 0L)
+    fun carVersion(c: Context): String = sp(c).getString("carVersion", "") ?: ""
+    fun diag(c: Context): String = sp(c).getString("diag", "") ?: ""
 
     @Synchronized
     fun saveLive(c: Context, m: CarLink.CarMsg, from: String) {
-        sp(c).edit()
+        val e = sp(c).edit()
             .putString("cache", m.backupJson).putString("cacheName", "live")
             .putString("liveTrip", m.live?.let { TripLog.encode(listOf(it)) } ?: "")
             .putFloat("liveVolt", m.voltage)
             .putLong("liveAt", System.currentTimeMillis())
             .putString("liveFrom", from)
-            .apply()
+        if (m.extra.appVersion.isNotEmpty()) e.putString("carVersion", m.extra.appVersion)
+        m.extra.diag?.let { e.putString("diag", it) }
+        m.extra.pos?.let { e.putString("pos", "${it.lat},${it.lon},${it.at},${it.speed}") }
+        e.apply()
     }
+
+    /** Last position the car reported (where it is now, or where it was parked). */
+    fun pos(c: Context): CarLink.Pos? = sp(c).getString("pos", null)?.split(',')?.takeIf { it.size == 4 }?.let {
+        runCatching { CarLink.Pos(it[0].toDouble(), it[1].toDouble(), it[2].toLong(), it[3].toFloat()) }.getOrNull()
+    }
+
+    fun mapUri(p: CarLink.Pos): Uri = Uri.parse("geo:${p.lat},${p.lon}?q=${p.lat},${p.lon}(My car)")
+
+    fun lastLiveTrip(c: Context): TripRecord? = TripLog.decode(sp(c).getString("liveTrip", "")).firstOrNull()
 
     /** The cached data, with the live trip applied when it came over the link. */
     fun cached(c: Context): CarData? {
@@ -164,6 +299,38 @@ object LinkStore {
         val trip = TripLog.decode(p.getString("liveTrip", "")).firstOrNull()
         return d.withLive(trip, p.getFloat("liveVolt", -1f))
     }
+
+    // ------------------------------------------------------------------ launcher update for the car
+
+    fun launcherFile(c: Context) = File(c.filesDir, "car-launcher.apk")
+
+    /** The launcher APK this phone holds for the car, with its offer details. */
+    fun offer(c: Context): Pair<CarLink.Offer, File>? {
+        val p = sp(c)
+        val ver = p.getString("offerVer", null) ?: return null
+        val f = launcherFile(c)
+        if (!f.exists()) return null
+        return CarLink.Offer(ver, p.getLong("offerSize", 0L), p.getString("offerSha", "") ?: "") to f
+    }
+
+    fun setOffer(c: Context, ver: String, size: Long, sha: String) =
+        sp(c).edit().putString("offerVer", ver).putLong("offerSize", size).putString("offerSha", sha).apply()
+
+    fun clearOffer(c: Context) {
+        sp(c).edit().remove("offerVer").remove("offerSize").remove("offerSha").apply()
+        launcherFile(c).delete()
+    }
+
+    /** The offer to send, or null when the car already runs that version (then it's cleaned up). */
+    fun offerFor(c: Context, carVersion: String): CarLink.Offer? {
+        val o = offer(c)?.first ?: return null
+        if (carVersion.isNotEmpty() && com.minimal.carlauncher.core.CompanionUpdate.compare(o.version, carVersion) <= 0) {
+            clearOffer(c); return null
+        }
+        return o
+    }
+
+    // ------------------------------------------------------------------ fill-ups kept for the link
 
     @Synchronized
     fun localFills(c: Context): List<InboxFill> = try {

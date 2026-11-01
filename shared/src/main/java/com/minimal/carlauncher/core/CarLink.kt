@@ -56,17 +56,39 @@ object CarLink {
 
     // ------------------------------------------------------------------ messages
 
-    /** Car -> phone: the same backup JSON the cloud gets, plus the trip in progress. */
-    fun carMessage(backupJson: String, live: TripRecord?, voltage: Float, now: Long, acked: List<String>): String =
-        JSONObject()
-            .put("k", "car").put("t", now)
-            .put("backup", JSONObject(backupJson))
-            .put("live", if (live == null) JSONObject.NULL else JSONArray(TripLog.encode(listOf(live))))
-            .put("v", voltage.toDouble())
-            .put("ack", JSONArray(acked))
-            .toString()
+    /** Where the car is (for "where did I park"); speed in m/s. */
+    data class Pos(val lat: Double, val lon: Double, val at: Long, val speed: Float)
 
-    data class CarMsg(val time: Long, val backupJson: String, val live: TripRecord?, val voltage: Float, val acked: List<String>)
+    /** Extra car state for alerts, parking and diagnostics. */
+    data class CarExtra(
+        val appVersion: String = "",
+        /** 0 none, 1 not charging, 2 overcharging (the panel's battery pill). */
+        val chargeAlert: Int = 0,
+        val pos: Pos? = null,
+        /** Panel log and status lines for the phone's diagnostics screen. */
+        val diag: String? = null,
+    )
+
+    /** Car -> phone: the same backup JSON the cloud gets, plus the trip in progress. */
+    fun carMessage(
+        backupJson: String, live: TripRecord?, voltage: Float, now: Long, acked: List<String>,
+        extra: CarExtra = CarExtra(),
+    ): String = JSONObject()
+        .put("k", "car").put("t", now)
+        .put("backup", JSONObject(backupJson))
+        .put("live", if (live == null) JSONObject.NULL else JSONArray(TripLog.encode(listOf(live))))
+        .put("v", voltage.toDouble())
+        .put("ack", JSONArray(acked))
+        .put("app", extra.appVersion)
+        .put("ca", extra.chargeAlert)
+        .put("pos", extra.pos?.let { JSONObject().put("la", it.lat).put("lo", it.lon).put("t", it.at).put("sp", it.speed.toDouble()) } ?: JSONObject.NULL)
+        .put("diag", extra.diag ?: JSONObject.NULL)
+        .toString()
+
+    data class CarMsg(
+        val time: Long, val backupJson: String, val live: TripRecord?, val voltage: Float, val acked: List<String>,
+        val extra: CarExtra = CarExtra(),
+    )
 
     fun parseCar(text: String, now: Long): CarMsg? = try {
         val o = JSONObject(text)
@@ -78,23 +100,60 @@ object CarLink {
             o.optJSONArray("live")?.let { TripLog.decode(it.toString()).firstOrNull() },
             o.optDouble("v", -1.0).toFloat(),
             o.optJSONArray("ack")?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty(),
+            CarExtra(
+                o.optString("app"),
+                o.optInt("ca", 0),
+                o.optJSONObject("pos")?.let { Pos(it.getDouble("la"), it.getDouble("lo"), it.optLong("t"), it.optDouble("sp", 0.0).toFloat()) },
+                if (o.isNull("diag")) null else o.optString("diag"),
+            ),
         )
     } catch (_: Exception) {
         null
     }
 
-    /** Phone -> car: fill-ups logged on the phone that the car hasn't acknowledged yet. */
-    fun phoneMessage(fills: List<InboxFill>, now: Long): String = JSONObject()
+    /** A launcher APK the phone has ready for the car (integrity: size + SHA-256, in the sealed reply). */
+    data class Offer(val version: String, val size: Long, val sha256: String)
+
+    data class PhoneMsg(val fills: List<InboxFill>, val offer: Offer?)
+
+    /** Phone -> car: fill-ups the car hasn't acknowledged yet, and an update if the phone has one. */
+    fun phoneMessage(fills: List<InboxFill>, now: Long, offer: Offer? = null): String = JSONObject()
         .put("k", "phone").put("t", now)
         .put("fills", JSONArray(fills.map { JSONObject(it.toJson()) }))
+        .put("offer", offer?.let { JSONObject().put("ver", it.version).put("size", it.size).put("sha", it.sha256) } ?: JSONObject.NULL)
         .toString()
 
-    fun parsePhone(text: String, now: Long): List<InboxFill>? = try {
+    fun parsePhone(text: String, now: Long): PhoneMsg? = try {
         val o = JSONObject(text)
         if (o.optString("k") != "phone" || kotlin.math.abs(now - o.getLong("t")) > MAX_AGE_MS) null
-        else o.optJSONArray("fills")?.let { a -> (0 until a.length()).mapNotNull { InboxFill.parse(a.getJSONObject(it).toString()) } }.orEmpty()
+        else PhoneMsg(
+            o.optJSONArray("fills")?.let { a -> (0 until a.length()).mapNotNull { InboxFill.parse(a.getJSONObject(it).toString()) } }.orEmpty(),
+            o.optJSONObject("offer")?.let { Offer(it.getString("ver"), it.getLong("size"), it.getString("sha")) },
+        )
     } catch (_: Exception) {
         null
+    }
+
+    /** Car -> phone on a second connection: "send me that APK". The phone streams the raw bytes back. */
+    fun apkRequest(version: String, now: Long): String =
+        JSONObject().put("k", "getapk").put("t", now).put("ver", version).toString()
+
+    fun parseApkRequest(text: String, now: Long): String? = try {
+        val o = JSONObject(text)
+        if (o.optString("k") != "getapk" || kotlin.math.abs(now - o.getLong("t")) > MAX_AGE_MS) null
+        else o.getString("ver")
+    } catch (_: Exception) {
+        null
+    }
+
+    /** Lower-case hex SHA-256 of a file. */
+    fun sha256(file: java.io.File): String {
+        val md = java.security.MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { inp ->
+            val buf = ByteArray(64 * 1024)
+            while (true) { val n = inp.read(buf); if (n < 0) break; md.update(buf, 0, n) }
+        }
+        return md.digest().joinToString("") { "%02x".format(it) }
     }
 
     /** backups/link.json content (the key file the phone fetches once). */

@@ -5,4 +5,6 @@
     <string name="link_title">Car Companion</string>
     <string name="link_waiting">Waiting for your car</string>
     <string name="link_live">Live from car · %1$s</string>
+    <string name="ch_alerts">Car alerts</string>
+    <string name="ch_trips">Trip summaries</string>
 </resources>
