@@ -64,7 +64,7 @@ object AdbBridge {
 
     private fun listen(c: Context) {
         try {
-            val ss = ServerSocket().apply { reuseAddress = true; bind(InetSocketAddress(InetAddress.getLoopbackAddress(), PORT)) }
+            val ss = ServerSocket().apply { reuseAddress = true; bind(InetSocketAddress(InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)), PORT)) }
             listener = ss
             while (!ss.isClosed) {
                 val client = try { ss.accept() } catch (_: Exception) { break }
