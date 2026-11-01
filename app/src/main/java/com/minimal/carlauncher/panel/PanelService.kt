@@ -15,7 +15,6 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.media.AudioManager
 import android.net.Uri
-import android.os.BatteryManager
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
@@ -113,35 +112,28 @@ class PanelService : Service() {
     private var weather: Weather? = null
     @Volatile private var weatherFetching = false
 
-    // Stay on the current screen when ZLink auto-jumps to the front on phone connect.
-    private var zlinkReceiver: BroadcastReceiver? = null
-    private var stayPrevApp: String? = null
-    private var stayUntilMs = 0L
-    private var stayBounces = 0
-
-    // Guard for the first minutes after ignition on: ZLink may bring itself forward on a
-    // cold boot without the PHONEFOUND broadcast we normally catch (or before we listen).
+    /** elapsedRealtime of the current ignition (new trip), 0 = not seen since the service started. */
     private var ignitionElapsed = 0L
-    private var guardBounces = 0
-    private var lastNonZlinkTop: String? = null
     private var lastWakeLogMs = 0L
-    private var locMgr: android.location.LocationManager? = null
-    private var lastFix: android.location.Location? = null
-    private var pendingKm = 0.0
-    private val gpsListener = object : android.location.LocationListener {
-        override fun onLocationChanged(l: android.location.Location) = onGpsFix(l)
-        @Deprecated("framework")
-        override fun onStatusChanged(p: String?, s: Int, e: android.os.Bundle?) = Unit
-        override fun onProviderEnabled(p: String) = Unit
-        override fun onProviderDisabled(p: String) = Unit
+
+    // The parts that do the work; this service wires them to the panel views.
+    private val volts by lazy { VoltageReader(this) }
+    private val battery by lazy {
+        BatteryMonitor(this, handler, { ignitionElapsed }, { trips.movingNow() }) {
+            shownBattState = -1          // re-style the pill
+            updateBatteryDisplay()
+        }
     }
+    private val trips by lazy { TripTracker(this, { volts.engineMaybeRunning() }) { handler.post { liveLinkTick() } } }
+    private val zlink by lazy { ZlinkGuard(this, handler, { ignitionElapsed }, { reversing }) }
+    private val cloud by lazy { CloudSync(this, handler) { onPhoneFillsAdded() } }
 
     private val handler = Handler(Looper.getMainLooper())
 
     private val watchdog = object : Runnable {
         override fun run() {
             checkReverse()
-            checkZlinkTakeover()
+            zlink.check()
             checkViews()
             updateVolumeDisplay()
             updateBatteryDisplay()
@@ -194,13 +186,13 @@ class PanelService : Service() {
         registerBatteryReceiver()
         registerVolumeReceiver()
         registerVolumeObserver()
-        registerZlinkReceiver()
+        zlink.register()
         com.minimal.carlauncher.core.PhoneMedia.kick = { handler.post { liveLinkTick() } }
         com.minimal.carlauncher.core.ZlinkStatus.addListener(playSync)
         com.minimal.carlauncher.core.PhoneMedia.addListener(playSync)
         lastHeartbeatMs = 0L
         tripHeartbeat()
-        startGpsOdometer()
+        trips.start()
         if (weather == null) {
             weather = Prefs.weatherJson.takeIf { it.isNotEmpty() && System.currentTimeMillis() - Prefs.weatherAt < WEATHER_STALE_MS }
                 ?.let { WeatherApi.parse(it) }
@@ -218,7 +210,7 @@ class PanelService : Service() {
             build()
             restartWatchdog()
             startVolumeWatcher()
-            scheduleTakeoverChecks()
+            zlink.scheduleChecks()
             return START_STICKY
         }
 
@@ -252,11 +244,9 @@ class PanelService : Service() {
         unregisterBatteryReceiver()
         unregisterVolumeReceiver()
         unregisterVolumeObserver()
-        zlinkReceiver?.let { try { unregisterReceiver(it) } catch (_: Exception) {} }
-        zlinkReceiver = null
-        try { locMgr?.removeUpdates(gpsListener) } catch (_: Exception) {}
-        if (pendingKm > 0) { Prefs.gpsOdoKm = Prefs.gpsOdoKm + pendingKm; pendingKm = 0.0 }
-        flushTripStats(force = true)
+        zlink.unregister()
+        battery.stop()
+        trips.stop()
         clear()
         log("service destroyed")
         super.onDestroy()
@@ -354,8 +344,8 @@ class PanelService : Service() {
             isClickable = true
             isFocusable = true
             setOnClickListener {
-                val curV = getBatteryVoltageDisplay()
-                Toast.makeText(this@PanelService, "Voltage $curV\nsource: $voltSource", Toast.LENGTH_LONG).show()
+                val curV = volts.display()
+                Toast.makeText(this@PanelService, "Voltage $curV\nsource: ${volts.source}", Toast.LENGTH_LONG).show()
                 updateBatteryDisplay()
             }
             // Long-press the pill to line the knob graphics up with the physical knobs.
@@ -368,7 +358,7 @@ class PanelService : Service() {
         }
 
         val voltText = TextView(this).apply {
-            text = "\u26A1 " + getBatteryVoltageDisplay()
+            text = "\u26A1 " + volts.display()
             setTextColor(Color.rgb(0, 240, 255))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 17f)
             typeface = Typeface.DEFAULT_BOLD
@@ -387,7 +377,7 @@ class PanelService : Service() {
             includeFontPadding = false
         }
         val trip = TextView(this).apply {
-            text = tripText()
+            text = trips.tripText()
             setTextColor(Neon.TEXT_2)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
             typeface = Typeface.MONOSPACE
@@ -685,7 +675,7 @@ class PanelService : Service() {
      */
     private fun updateDockActive() {
         if (dockTiles.isEmpty()) return
-        val active = dockIndexFor(currentTopApp())
+        val active = dockIndexFor(ZlinkGuard.topApp(this))
         if (active == shownDockActive) return
         shownDockActive = active
         val radius = px(20f).toFloat()
@@ -925,7 +915,7 @@ class PanelService : Service() {
             override fun onChange(selfChange: Boolean) {
                 super.onChange(selfChange)
                 checkReverse()
-                checkZlinkTakeover()
+                zlink.check()
                 updateVolumeDisplay()
                 updateDockActive()
             }
@@ -950,137 +940,11 @@ class PanelService : Service() {
 
     // --------------------------------------------------------------------- live data: battery
 
-    /**
-     * Reads the car battery voltage.
-     * Primary: BatteryManager.EXTRA_VOLTAGE from the sticky BATTERY_CHANGED broadcast.
-     * Fallback: Settings.System/Global keys for MCU hardware voltages.
-     * No source: shows '--.-V' (never a made-up number).
-     */
-    /**
-     * Reads the car battery / ACC input voltage from every known source on the K2401.
-     *
-     * Chain (first valid value wins):
-     * 0. NWD CAN broadcast com.nwd.action.ACTION_CAN_BATTERY_VOLTAGE, extra "Voltage" (139 = 13.9V).
-     * 1. BatteryManager.EXTRA_VOLTAGE from the sticky BATTERY_CHANGED broadcast.
-     * 2. Linux sysfs power_supply nodes -- Allwinner T507/A133 SoCs expose the ACC input
-     *    voltage here as microvolts (e.g. 12300000 = 12.3V). The AXP2202 PMIC and generic
-     *    battery/ac/usb nodes are all tried.
-     * 3. Settings.System / Settings.Global keys used by various MCU firmware versions.
-     * 4. A plausible 'vol*' extra from a vendor voltage broadcast.
-     * 5. Otherwise '--.-V'. Tap the pill to see which source was used.
-     */
-    /** Where the last voltage reading came from; shown when the pill is tapped. */
-    private var voltSource = "none"
-
-    private fun fmtVolts(v: Float) = String.format(Locale.US, "%.1fV", v)
-
-    /** Converts a raw reading in uV, mV, tenths or volts to volts. */
-    private fun toVolts(raw: Long): Float = when {
-        raw > 1_000_000 -> raw / 1_000_000f
-        raw > 1_000 -> raw / 1_000f
-        raw > 100 -> raw / 10f
-        else -> raw.toFloat()
-    }
-
-    private fun plausible(v: Float) = v in 6.0f..18.5f
-
-    private fun getBatteryVoltageDisplay(): String {
-        // --- Source 0: NWD CAN box broadcast (what the stock launcher shows) ---
-        canVolts?.let { v ->
-            if (plausible(v)) { voltSource = "NWD CAN broadcast (Voltage=${canRaw})"; return fmtVolts(v) }
-        }
-        Prefs.lastVoltage.takeIf { plausible(it) }?.let { v ->
-            voltSource = "last saved value, waiting for broadcast (${lastVoltExtras})"
-            return fmtVolts(v)
-        }
-
-        // --- Source 1: BatteryManager sticky broadcast ---
-        try {
-            val bi = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-            val mv = bi?.getIntExtra(BatteryManager.EXTRA_VOLTAGE, -1) ?: -1
-            if (mv > 0) {
-                val v = toVolts(mv.toLong())
-                if (plausible(v)) { voltSource = "BatteryManager ($mv)"; return fmtVolts(v) }
-            }
-        } catch (_: Exception) {}
-
-        // --- Source 2: explicit sysfs paths first, then every power_supply node ---
-        val paths = LinkedHashSet<String>(EXTRA_VOLT_PATHS)
-        try {
-            java.io.File("/sys/class/power_supply").listFiles()?.forEach { dir ->
-                for (n in listOf("voltage_now", "voltage_avg", "batt_vol", "input_voltage")) {
-                    paths.add("${dir.path}/$n")
-                }
-            }
-        } catch (_: Exception) {}
-        for (path in paths) {
-            try {
-                val f = java.io.File(path)
-                if (!f.canRead()) continue
-                val raw = f.readText().trim().split(Regex("\\s+")).first().toLongOrNull() ?: continue
-                if (raw <= 0) continue
-                val v = toVolts(raw)
-                if (plausible(v)) { voltSource = "$path ($raw)"; return fmtVolts(v) }
-            } catch (_: Exception) {}
-        }
-
-        // --- Source 3: Settings.System / Settings.Global (MCU firmware keys) ---
-        for (k in VOLT_SETTING_KEYS) {
-            try {
-                val str = Settings.System.getString(contentResolver, k)
-                    ?: Settings.Global.getString(contentResolver, k) ?: continue
-                val num = Regex("[0-9]+(\\.[0-9]+)?").find(str)?.value ?: continue
-                val v = if (num.contains('.')) num.toFloat() else toVolts(num.toLong())
-                if (plausible(v)) { voltSource = "settings:$k ($str)"; return fmtVolts(v) }
-            } catch (_: Exception) {}
-        }
-
-        // --- Source 4: value pushed by a firmware broadcast (see registerBatteryReceiver) ---
-        lastBroadcastVolts?.let { if (plausible(it.first)) { voltSource = it.second; return fmtVolts(it.first) } }
-
-        // No real source: say so instead of showing a made-up number.
-        voltSource = "none found; last broadcast extras: $lastVoltExtras"
-        return "--.-V"
-    }
-
-    private var lastBroadcastVolts: Pair<Float, String>? = null
-    private var canVolts: Float? = null
-    private var canRaw: Int = -1
-
-    /** Extras of the last voltage broadcast, as "key:Type=value", for the pill's tap toast. */
-    private var lastVoltExtras = "none received yet"
-
-    /**
-     * Parses ACTION_CAN_BATTERY_VOLTAGE (sent by com.nwd.kernel every ~30 s). The value is
-     * tenths of a volt (142 = 14.2V). Accepts any numeric type (Int, Short, Byte, Long,
-     * Float...) or a string, under "Voltage" or any key containing "volt".
-     */
-    private fun handleCanVoltage(intent: Intent) {
-        val ex = intent.extras ?: return
-        lastVoltExtras = ex.keySet().joinToString { k ->
-            @Suppress("DEPRECATION") val o = ex.get(k)
-            "$k:${o?.javaClass?.simpleName}=$o"
-        }
-        val keys = listOf(NWD_VOLT_KEY) + ex.keySet().filter { it.contains("volt", ignoreCase = true) }
-        for (k in keys) {
-            @Suppress("DEPRECATION") val o = ex.get(k) ?: continue
-            val v: Float = when (o) {
-                is Float -> if (o > 40f) o / 10f else o
-                is Double -> (if (o > 40.0) o / 10.0 else o).toFloat()
-                is Number -> o.toLong().let { if (it > 1000) it / 1000f else it / 10f }
-                is String -> o.filter { it.isDigit() || it == '.' }.toFloatOrNull()
-                    ?.let { if (it > 40f) it / 10f else it } ?: continue
-                else -> continue
-            }
-            if (plausible(v)) {
-                canRaw = (v * 10).toInt()
-                canVolts = v
-                voltSeq++
-                Prefs.lastVoltage = v
-                lastVoltAt = SystemClock.elapsedRealtime()
-                onVoltageReading(v)
-                return
-            }
+    /** A CAN voltage broadcast: show it and feed the battery health monitor. */
+    private fun onCanVoltage(intent: Intent) {
+        volts.handleCan(intent)?.let { v ->
+            voltSeq++
+            battery.onReading(v)
         }
     }
 
@@ -1116,17 +980,15 @@ class PanelService : Service() {
 
     private fun updateBatteryDisplay() {
         handler.post {
-            val volt = getBatteryVoltageDisplay()
+            val volt = volts.display()
             // Non-broadcast sources are polled; treat each poll as a fresh reading.
-            if (!voltSource.startsWith("NWD CAN")) voltSeq++
+            if (!volts.fromCan) voltSeq++
             evaluateBatteryState(volt.removeSuffix("V").toFloatOrNull())
             val icon = BATT_ICONS[shownBattState.coerceAtLeast(0)]
             batteryDisplay?.text = "$icon $volt"
-            tripView?.text = tripText()
+            tripView?.text = trips.tripText()
         }
     }
-
-    private fun currentVolts(): Float? = getBatteryVoltageDisplay().removeSuffix("V").toFloatOrNull()
 
     /** 0 none, 1 charging, 2 normal, 3 low, 4 critical. */
     private fun classify(v: Float?): Int = when {
@@ -1158,6 +1020,7 @@ class PanelService : Service() {
 
     private fun applyBatteryState(state: Int) {
         // Not charging while driving shows amber even when the voltage itself looks normal.
+        val chargeAlert = battery.chargeAlert
         val s = if (chargeAlert == 1 && state < BATT_LOW) BATT_LOW else state
         if (s == shownBattState) return
         shownBattState = s
@@ -1249,156 +1112,6 @@ class PanelService : Service() {
         }
     }
 
-    /**
-     * GPS odometer for the fuel estimate. Runs inside this foreground service (declared
-     * foregroundServiceType="location"), so it keeps counting while Maps / ZLink are in front.
-     */
-    private fun startGpsOdometer() {
-        if (locMgr != null) return
-        if (checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) !=
-            android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            log("gps odometer: no location permission")
-            return
-        }
-        try {
-            val m = getSystemService(android.location.LocationManager::class.java) ?: return
-            m.requestLocationUpdates(
-                android.location.LocationManager.GPS_PROVIDER, 1000L, 0f, gpsListener, Looper.getMainLooper()
-            )
-            locMgr = m
-        } catch (e: Exception) {
-            log("gps odometer failed: $e")
-        }
-    }
-
-    /** Adds distance between good fixes; drops noisy, stale, parked and impossible jumps. */
-    private fun onGpsFix(l: android.location.Location) {
-        if (!l.hasAccuracy() || l.accuracy > 30f) return
-        val p = lastFix
-        lastFix = l
-        if (p == null) return
-        val dt = (l.time - p.time) / 1000.0
-        if (dt <= 0.0 || dt > 60.0) return
-        val d = p.distanceTo(l).toDouble()
-        if (d / dt > 70.0) return                                  // > 250 km/h: a GPS jump
-        // Trip timing: moving vs idling (engine on, standing still).
-        val mps = if (l.hasSpeed()) l.speed.toDouble() else d / dt
-        // Standing still only counts as idling while the engine runs (alternator charging);
-        // with just the screen on (ACC) no fuel is used. No recent reading: count it.
-        if (mps >= 1.5) tripDriveAcc += dt else if (engineMaybeRunning()) tripIdleAcc += dt
-        // Hard events over ~2 s spans: 1 s GPS speed steps are too noisy on their own.
-        val ref = hardRef
-        if (ref == null || l.time - ref.time > 3_500L) hardRef = l
-        else if (l.time - ref.time >= 1_800L) { countHardEvents(ref, l, (l.time - ref.time) / 1000.0); hardRef = l }
-        if (l.hasSpeed() && l.accuracy <= 20f) perfTimer.feed(l.time, l.speed * 3.6f).forEach { onPerfRun(it) }
-        // Just stopped: push to the phone now, so its "parked here" spot is where the car stands.
-        if (mps >= 2.0) wasMoving = true
-        else if (wasMoving && mps < 0.5) { wasMoving = false; handler.post { liveLinkTick() } }
-        if (l.hasSpeed() && l.speed < 70f) tripMaxKmh = maxOf(tripMaxKmh, l.speed * 3.6f)
-        flushTripStats(force = false)
-        if (d < 5.0 || (l.hasSpeed() && l.speed < 1f && d < 30.0)) return   // parked jitter
-        pendingKm += d / 1000.0
-        if (mps * 3.6 >= com.minimal.carlauncher.core.FuelModel.HWY_KMH) tripHwyAcc += d / 1000.0
-        if (pendingKm >= 0.2) {
-            Prefs.gpsOdoKm = Prefs.gpsOdoKm + pendingKm
-            pendingKm = 0.0
-        }
-    }
-
-    // --------------------------------------------------------------------- stay on screen (ZLink)
-
-    /**
-     * ZLink broadcasts action "com.zjinnova.zlink" with status=ACTION_ZJ_PHONEFOUND when a
-     * phone connects, then immediately starts its own MainActivity. We remember the app that
-     * was on screen and, if ZLink takes the front within STAY_WINDOW_MS, put it back. Outside
-     * that window (floating button, Phone Link tile) ZLink opens normally.
-     */
-    private fun registerZlinkReceiver() {
-        if (zlinkReceiver != null) return
-        zlinkReceiver = object : BroadcastReceiver() {
-            override fun onReceive(context: Context, intent: Intent) {
-                val status = intent.getStringExtra("status") ?: return
-                // Shared with the home screen's Phone Link and Music cards.
-                if (com.minimal.carlauncher.core.ZlinkStatus.onBroadcast(status, intent.getStringExtra("phoneMode")))
-                    log("zlink: $status")
-                if (!Prefs.stayOnConnect) return
-                if (status == "ACTION_ZJ_PHONEFOUND" || (status == "CONNECTED" && stayUntilMs == 0L)) {
-                    val top = currentTopApp()
-                    stayPrevApp = top?.takeIf { it != ZLINK_PKG && it !in NEVER_RETURN_TO }
-                        ?: stayPrevApp ?: packageName
-                    stayUntilMs = SystemClock.uptimeMillis() + STAY_WINDOW_MS
-                    stayBounces = 0
-                    log("zlink $status -- will keep $stayPrevApp in front")
-                    for (d in longArrayOf(700, 1500, 3000, 5000, 8000, STAY_WINDOW_MS)) {
-                        handler.postDelayed({ bounceBackIfZlink() }, d)
-                    }
-                }
-            }
-        }
-        try {
-            registerReceiver(zlinkReceiver, IntentFilter(ZLINK_ACTION))
-        } catch (_: Exception) {}
-    }
-
-    private fun userOpenedZlinkRecently() =
-        System.currentTimeMillis() - Prefs.userOpenedZlinkAt < USER_OPEN_GRACE_MS
-
-    /** Re-checks a few times right after the service (re)starts, e.g. after a cold boot. */
-    private fun scheduleTakeoverChecks() {
-        for (d in longArrayOf(1_500, 4_000, 8_000, 15_000)) {
-            handler.postDelayed({ checkZlinkTakeover() }, d)
-        }
-    }
-
-    /**
-     * Within GUARD_MS of ignition on, if ZLink is in front and the driver did not open it
-     * from the Phone Link tile, go back. At most twice per ignition, so the floating button
-     * still wins if the driver really wants Android Auto that early.
-     */
-    private fun checkZlinkTakeover() {
-        val top = currentTopApp() ?: return
-        if (top != ZLINK_PKG) {
-            if (top !in NEVER_RETURN_TO) lastNonZlinkTop = top
-            return
-        }
-        if (!Prefs.stayOnConnect || reversing) return
-        if (ignitionElapsed == 0L) return
-        if (SystemClock.elapsedRealtime() - ignitionElapsed > GUARD_MS) return
-        if (guardBounces >= 2 || userOpenedZlinkRecently()) return
-        if (SystemClock.uptimeMillis() < stayUntilMs) return   // broadcast path is handling it
-        guardBounces++
-        val prev = lastNonZlinkTop?.takeIf { it != ZLINK_PKG } ?: packageName
-        log("zlink in front after ignition -- returning to $prev (guard $guardBounces)")
-        returnTo(prev)
-    }
-
-    private fun currentTopApp(): String? = try {
-        Settings.System.getString(contentResolver, "key_top_app")
-    } catch (_: Exception) { null }
-
-    private fun bounceBackIfZlink() {
-        if (SystemClock.uptimeMillis() > stayUntilMs) { stayUntilMs = 0L; return }
-        if (currentTopApp() != ZLINK_PKG || stayBounces >= 3) return
-        if (userOpenedZlinkRecently() || reversing) return
-        val prev = stayPrevApp ?: packageName
-        stayBounces++
-        log("zlink jumped to front -- returning to $prev")
-        returnTo(prev)
-    }
-
-    /** Brings [prev] (or the launcher) back to the front. */
-    private fun returnTo(target: String) {
-        val prev = if (target in NEVER_RETURN_TO) packageName else target
-        val home = Intent(this, Class.forName("com.minimal.carlauncher.ui.HomeActivity"))
-        val intent = if (prev == packageName) home
-        else packageManager.getLaunchIntentForPackage(prev) ?: home
-        try {
-            startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
-        } catch (e: Exception) {
-            log("stay-on-screen failed: $e")
-        }
-    }
-
     // --------------------------------------------------------------------- weather
 
     private fun applyWeather() {
@@ -1463,7 +1176,7 @@ class PanelService : Service() {
 
     /** Live GPS fix, else last known fix, else the map's last position. */
     private fun weatherLocation(): Pair<Double, Double>? {
-        lastFix?.let { return it.latitude to it.longitude }
+        trips.lastFix?.let { return it.latitude to it.longitude }
         try {
             if (checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) ==
                 android.content.pm.PackageManager.PERMISSION_GRANTED) {
@@ -1475,92 +1188,6 @@ class PanelService : Service() {
             }
         } catch (_: Exception) {}
         return Prefs.mapCamera()?.let { it.first to it.second }
-    }
-
-    // --------------------------------------------------------------------- battery health
-
-    private var restingWindowOpen = false
-    /** Readings from ignition until the engine first charges: resting level, then the cranking dip. */
-    private val startSamples = ArrayList<Float>()
-    private var startPollUntil = 0L
-
-    /** Opens the start window and asks the MCU for the voltage twice a second for a minute. */
-    private fun openStartWindow() {
-        restingWindowOpen = true
-        seenChargingThisTrip = false
-        startSamples.clear()
-        startPollUntil = SystemClock.elapsedRealtime() + 60_000L
-        handler.removeCallbacks(startPoll)
-        handler.post(startPoll)
-    }
-
-    private val startPoll = object : Runnable {
-        override fun run() {
-            if (!restingWindowOpen) return
-            if (SystemClock.elapsedRealtime() - ignitionElapsed >= 180_000L) { closeStartWindow(); return }
-            if (SystemClock.elapsedRealtime() < startPollUntil) {
-                try { sendBroadcast(Intent(NWD_VOLT_QUERY_ACTION)) } catch (_: Exception) {}
-                handler.postDelayed(this, 500L)
-            } else handler.postDelayed(this, 30_000L)
-        }
-    }
-
-    /** Saves the resting voltage and, if one was caught, the cranking dip. */
-    private fun closeStartWindow() {
-        restingWindowOpen = false
-        handler.removeCallbacks(startPoll)
-        val bh = com.minimal.carlauncher.core.BatteryHealth
-        val (rest, crank) = bh.splitStart(startSamples)
-        val day = com.minimal.carlauncher.core.BackupStore.today()
-        var days = Prefs.batteryLog
-        rest?.let { days = bh.addResting(days, day, it) }
-        crank?.let { days = bh.addCrank(days, day, it) }
-        if (rest != null || crank != null) Prefs.batteryLog = days
-        log(String.format(Locale.US, "start: %d readings, resting %s, cranking dip %s", startSamples.size,
-            rest?.let { String.format(Locale.US, "%.2fV", it) } ?: "-", crank?.let { String.format(Locale.US, "%.1fV", it) } ?: "not caught"))
-        startSamples.clear()
-    }
-    private var seenChargingThisTrip = false
-    private var lowChargeCount = 0
-    private var highChargeCount = 0
-    /** 0 none, 1 not charging (low while driving), 2 overcharging. */
-    private var chargeAlert = 0
-
-    private fun movingNow(): Boolean {
-        val f = lastFix ?: return false
-        val age = System.currentTimeMillis() - f.time
-        return age < 15_000L && f.hasSpeed() && f.speed >= 15f / 3.6f
-    }
-
-    /** Records resting / charging voltage and keeps the charging alert up to date. */
-    private fun onVoltageReading(v: Float) {
-        val day = com.minimal.carlauncher.core.BackupStore.today()
-        val bh = com.minimal.carlauncher.core.BatteryHealth
-        val sinceIgnition = SystemClock.elapsedRealtime() - ignitionElapsed
-        if (v >= bh.CHARGE_LOW) seenChargingThisTrip = true
-        if (restingWindowOpen && ignitionElapsed > 0L && sinceIgnition < 180_000L &&
-            !seenChargingThisTrip && v < bh.RESTING_MAX && !movingNow()) {
-            startSamples += v
-        }
-        if (restingWindowOpen && (sinceIgnition >= 180_000L || seenChargingThisTrip)) closeStartWindow()
-
-        if (movingNow()) {
-            Prefs.batteryLog = bh.addCharging(Prefs.batteryLog, day, v)
-            lowChargeCount = if (v < bh.CHARGE_LOW) lowChargeCount + 1 else 0
-            highChargeCount = if (v > bh.CHARGE_HIGH) highChargeCount + 1 else 0
-            val alert = when { lowChargeCount >= 3 -> 1; highChargeCount >= 2 -> 2; else -> 0 }
-            if (alert != chargeAlert) {
-                chargeAlert = alert
-                if (alert != 0) log(if (alert == 1) "warning: not charging while driving" else "warning: overcharging")
-                shownBattState = -1          // re-style the pill
-                updateBatteryDisplay()
-            }
-        } else if (chargeAlert != 0) {
-            // Only meaningful while driving: clear it when the car stops.
-            chargeAlert = 0; lowChargeCount = 0; highChargeCount = 0
-            shownBattState = -1
-            updateBatteryDisplay()
-        }
     }
 
     // --------------------------------------------------------------------- trip timer
@@ -1576,29 +1203,19 @@ class PanelService : Service() {
         lastHeartbeatMs = now
         val last = Prefs.tripLastSeen
         if (Prefs.tripStart <= 0L || last <= 0L || now - last > TRIP_GAP_MS || now < Prefs.tripStart) {
-            finishTrip()
-            Prefs.tripStart = now
-            Prefs.curTripGpsStart = Prefs.gpsOdoKm + pendingKm
-            Prefs.curTripDriveSec = 0L
-            Prefs.curTripIdleSec = 0L
-            Prefs.curTripMaxKmh = 0f
-            Prefs.curTripHwyKm = 0f
-            Prefs.curTripHardAccel = 0
-            Prefs.curTripHardBrake = 0
-            tripDriveAcc = 0.0; tripIdleAcc = 0.0; tripMaxKmh = 0f; tripHwyAcc = 0.0
-            hardAccelAcc = 0; hardBrakeAcc = 0
+            trips.finishTrip()
+            trips.beginTrip(now)
             ignitionElapsed = SystemClock.elapsedRealtime()
-            openStartWindow()
-            guardBounces = 0
+            battery.onIgnition()
+            zlink.onIgnition()
             log("ignition on (new trip) -- ZLink guard active")
         }
         // Trip started before this version recorded its GPS start: begin counting from now.
-        if (Prefs.curTripGpsStart <= 0.0) Prefs.curTripGpsStart = Prefs.gpsOdoKm + pendingKm
+        if (Prefs.curTripGpsStart <= 0.0) Prefs.curTripGpsStart = trips.odometerKm
         Prefs.tripLastSeen = now
-        Prefs.tripLastGps = Prefs.gpsOdoKm + pendingKm
-        flushTripStats(force = true)
-        maybeAutoBackup()
-        maybeCloudUpload()
+        Prefs.tripLastGps = trips.odometerKm
+        trips.flush(force = true)
+        cloud.tick()
         liveLinkTick()
     }
 
@@ -1616,11 +1233,7 @@ class PanelService : Service() {
             if (up && playing) handler.postDelayed(fastLink, 4_000)
             if (up != linkWasUp) { linkWasUp = up; log(if (up) "live link: phone at ${r.reached}" else "live link: phone not reachable") }
             r.note?.let { log("live link: $it") }
-            if (r.added > 0) handler.post {
-                fuelModelAt = 0L
-                updateFuelDisplay()
-                Toast.makeText(this, "Fill-up from your phone added to the fuel log", Toast.LENGTH_LONG).show()
-            }
+            if (r.added > 0) handler.post { onPhoneFillsAdded() }
             r.update?.let { (tag, file) ->
                 log("live link: launcher $tag received from the phone")
                 handler.post {
@@ -1631,13 +1244,21 @@ class PanelService : Service() {
         }
     }
 
+    /** Fill-ups logged on the phone were merged: refresh the fuel chip and say so. */
+    private fun onPhoneFillsAdded() {
+        fuelModelAt = 0L
+        updateFuelDisplay()
+        Toast.makeText(this, "Fill-up from your phone added to the fuel log", Toast.LENGTH_LONG).show()
+    }
+
     /** Charge alert, position and a diagnostics snapshot for the phone app. */
     private fun linkExtra(): com.minimal.carlauncher.core.CarLink.CarExtra {
-        val fix = lastFix
+        val fix = trips.lastFix
+        val chargeAlert = battery.chargeAlert
         val diag = buildString {
             appendLine("Launcher ${com.minimal.carlauncher.BuildConfig.VERSION_NAME}")
-            appendLine("Voltage ${canVolts ?: "--"} V   charge alert $chargeAlert")
-            appendLine("App in front: ${currentTopApp() ?: "-"}")
+            appendLine("Voltage ${volts.canVolts ?: "--"} V   charge alert $chargeAlert")
+            appendLine("App in front: ${ZlinkGuard.topApp(this@PanelService) ?: "-"}")
             appendLine("Cloud: ${Prefs.cloudStatus.ifEmpty { "-" }}")
             appendLine("Phone link: ${Prefs.linkPhone.ifEmpty { "-" }}")
             appendLine("GPS: ${if (fix == null) "no fix" else String.format(Locale.US, "±%.0f m", fix.accuracy)}")
@@ -1650,148 +1271,6 @@ class PanelService : Service() {
             pos = fix?.let { com.minimal.carlauncher.core.CarLink.Pos(it.latitude, it.longitude, it.time, if (it.hasSpeed()) it.speed else 0f) },
             diag = diag,
         )
-    }
-
-    @Volatile private var cloudBusy = false
-    @Volatile private var lastInboxCheck = 0L
-    private var lastCloudTry = 0L
-
-    /** Once a day to the private GitHub repo; after a failure, retry every 15 min. */
-    private fun maybeCloudUpload() {
-        if (cloudBusy || !Prefs.cloudConfigured) return
-        val dailyDone = Prefs.cloudLastDay == com.minimal.carlauncher.core.BackupStore.today()
-        val latestDue = Prefs.latestKey() != Prefs.cloudLatestKey ||
-            System.currentTimeMillis() - Prefs.cloudLatestAt > 60 * 60_000L
-        val inboxDue = SystemClock.elapsedRealtime() - lastInboxCheck > 15 * 60_000L || lastInboxCheck == 0L
-        if (dailyDone && !latestDue && !inboxDue && Prefs.linkKeyUploaded) return
-        val now = SystemClock.elapsedRealtime()
-        if (lastCloudTry != 0L && now - lastCloudTry < 15 * 60_000L) return
-        lastCloudTry = now
-        cloudBusy = true
-        Thread {
-            try {
-                if (inboxDue) {
-                    val added = com.minimal.carlauncher.core.CloudBackup.processInbox()
-                    lastInboxCheck = SystemClock.elapsedRealtime()
-                    if (added > 0) {
-                        log("cloud: $added fill-up(s) from the phone added")
-                        handler.post {
-                            fuelModelAt = 0L
-                            updateFuelDisplay()
-                            Toast.makeText(this, "Fill-up from your phone added to the fuel log", Toast.LENGTH_LONG).show()
-                        }
-                    }
-                }
-                if (com.minimal.carlauncher.core.CloudBackup.uploadLinkKeyIfNeeded()) log("cloud: live-link key shared")
-                if (com.minimal.carlauncher.core.CloudBackup.uploadIfDue()) log("cloud: " + Prefs.cloudStatus)
-                if (com.minimal.carlauncher.core.CloudBackup.uploadLatestIfDue()) log("cloud: latest.json updated")
-            } finally {
-                cloudBusy = false
-            }
-        }.start()
-    }
-
-    @Volatile private var backingUp = false
-
-    /** Once a day, a backup file in Download/CarLauncher (kept for 7 days). */
-    private fun maybeAutoBackup() {
-        if (backingUp || Prefs.lastAutoBackupDay == com.minimal.carlauncher.core.BackupStore.today()) return
-        backingUp = true
-        Thread {
-            try {
-                com.minimal.carlauncher.core.BackupStore.autoBackupIfDue(this)
-                log("auto backup: " + Prefs.lastAutoBackupDay)
-            } finally {
-                backingUp = false
-            }
-        }.start()
-    }
-
-    private var hardAccelAcc = 0
-    private var hardBrakeAcc = 0
-    private var lastHardAt = 0L
-    private var hardRef: android.location.Location? = null
-    private val perfTimer = com.minimal.carlauncher.core.PerfTimer()
-
-    /** A timed run finished: keep it and show it (the home screen if open, else a toast). */
-    private fun onPerfRun(r: com.minimal.carlauncher.core.PerfRun) {
-        val before = com.minimal.carlauncher.core.PerfTimer.best(Prefs.perfRuns, r.kind)
-        Prefs.perfRuns = com.minimal.carlauncher.core.PerfTimer.add(Prefs.perfRuns, r)
-        val best = before == null || r.sec < before.sec
-        log(String.format(Locale.US, "perf %s %.1fs%s", r.kind, r.sec, if (best) " best" else ""))
-        if (!com.minimal.carlauncher.core.PerfLive.post(r, best))
-            Toast.makeText(this, String.format(Locale.US, "%s km/h  %.1f s%s", r.kind, r.sec,
-                if (best) "  \u2014 new best!" else ""), Toast.LENGTH_SHORT).show()
-    }
-
-    /**
-     * Hard acceleration / braking from the change in GPS speed between two good fixes close in
-     * time. One event per 5 s at most, so one long hard stop counts once.
-     */
-    private fun countHardEvents(p: android.location.Location, l: android.location.Location, dt: Double) {
-        if (!p.hasSpeed() || !l.hasSpeed() || dt < 0.8 || dt > 3.5) return
-        if (l.accuracy > 15f || p.accuracy > 15f) return
-        if (maxOf(p.speed, l.speed) < 3f) return                      // ~10 km/h: parking moves don't count
-        val a = (l.speed - p.speed) / dt
-        val now = SystemClock.elapsedRealtime()
-        if (now - lastHardAt < 5_000L) return
-        when {
-            a >= com.minimal.carlauncher.core.EcoScore.HARD_ACCEL_MS2 -> { hardAccelAcc++; lastHardAt = now }
-            a <= com.minimal.carlauncher.core.EcoScore.HARD_BRAKE_MS2 -> { hardBrakeAcc++; lastHardAt = now }
-        }
-    }
-
-    @Volatile private var lastVoltAt = 0L
-    private var wasMoving = false
-
-    /** False only when a fresh voltage reading says the alternator is not charging. */
-    private fun engineMaybeRunning(): Boolean {
-        if (lastVoltAt == 0L || SystemClock.elapsedRealtime() - lastVoltAt > 5 * 60_000L) return true
-        return (canVolts ?: return true) >= ENGINE_ON_VOLTS
-    }
-
-    /** Saves the trip that ended at the last heartbeat (car was off since then). */
-    private fun finishTrip() {
-        val start = Prefs.tripStart
-        val end = Prefs.tripLastSeen
-        if (start <= 0L || end <= start) return
-        val startGps = Prefs.curTripGpsStart
-        val km = if (startGps <= 0.0 || Prefs.tripLastGps <= 0.0) 0.0
-            else (Prefs.tripLastGps - startGps).coerceAtLeast(0.0)
-        val rec = com.minimal.carlauncher.core.TripRecord(
-            start, end, km, Prefs.curTripDriveSec, Prefs.curTripIdleSec, Prefs.curTripMaxKmh,
-            Prefs.curTripHwyKm.toDouble().coerceAtMost(km), Prefs.curTripHardAccel, Prefs.curTripHardBrake
-        )
-        Prefs.tripHistory = com.minimal.carlauncher.core.TripLog.append(Prefs.tripHistory, rec)
-        log(if (rec.isParked) String.format(Locale.US, "parked idling saved: %d min", rec.idleSec / 60)
-            else String.format(Locale.US, "trip saved: %.1f km", km))
-    }
-
-    private var tripDriveAcc = 0.0
-    private var tripIdleAcc = 0.0
-    private var tripMaxKmh = 0f
-    private var tripHwyAcc = 0.0
-    private var lastTripFlush = 0L
-
-    /** Moves the in-memory drive / idle seconds into Prefs (every ~10 s, or now). */
-    private fun flushTripStats(force: Boolean) {
-        val now = SystemClock.elapsedRealtime()
-        if (!force && now - lastTripFlush < 10_000L) return
-        lastTripFlush = now
-        val drive = tripDriveAcc.toLong(); val idle = tripIdleAcc.toLong()
-        if (drive > 0) { Prefs.curTripDriveSec = Prefs.curTripDriveSec + drive; tripDriveAcc -= drive }
-        if (idle > 0) { Prefs.curTripIdleSec = Prefs.curTripIdleSec + idle; tripIdleAcc -= idle }
-        if (tripMaxKmh > Prefs.curTripMaxKmh) Prefs.curTripMaxKmh = tripMaxKmh
-        if (tripHwyAcc > 0.0) { Prefs.curTripHwyKm = Prefs.curTripHwyKm + tripHwyAcc.toFloat(); tripHwyAcc = 0.0 }
-        if (hardAccelAcc > 0) { Prefs.curTripHardAccel = Prefs.curTripHardAccel + hardAccelAcc; hardAccelAcc = 0 }
-        if (hardBrakeAcc > 0) { Prefs.curTripHardBrake = Prefs.curTripHardBrake + hardBrakeAcc; hardBrakeAcc = 0 }
-    }
-
-    private fun tripText(): String {
-        val start = Prefs.tripStart
-        if (start <= 0L) return "\u23F1 0:00"
-        val min = ((System.currentTimeMillis() - start) / 60_000L).coerceAtLeast(0L)
-        return String.format(Locale.US, "\u23F1 %d:%02d", min / 60, min % 60)
     }
 
     // --------------------------------------------------------------------- reverse camera
@@ -1813,28 +1292,10 @@ class PanelService : Service() {
         batteryReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
                 when (intent.action) {
-                    NWD_VOLT_ACTION -> { handleCanVoltage(intent); updateBatteryDisplay(); return }
+                    NWD_VOLT_ACTION -> { onCanVoltage(intent); updateBatteryDisplay(); return }
                     NWD_MUSIC_ACTION -> { handleMusicState(intent); return }
                 }
-                if (intent.action != Intent.ACTION_BATTERY_CHANGED) {
-                    intent.extras?.let { ex ->
-                        for (key in ex.keySet()) {
-                            if (!key.contains("vol", ignoreCase = true)) continue
-                            val v = when (val o = ex.get(key)) {
-                                is Float -> o
-                                is Double -> o.toFloat()
-                                is Int -> toVolts(o.toLong())
-                                is Long -> toVolts(o)
-                                is String -> o.filter { it.isDigit() || it == '.' }.toFloatOrNull()
-                                else -> null
-                            } ?: continue
-                            if (plausible(v)) {
-                                lastBroadcastVolts = v to "broadcast ${intent.action} [$key]"
-                                break
-                            }
-                        }
-                    }
-                }
+                if (intent.action != Intent.ACTION_BATTERY_CHANGED) volts.handleVendor(intent)
                 updateBatteryDisplay()
             }
         }
@@ -1846,7 +1307,7 @@ class PanelService : Service() {
             }
             registerReceiver(batteryReceiver, filter)
             // If the NWD broadcasts are sticky, pick up the last value immediately.
-            registerReceiver(null, IntentFilter(NWD_VOLT_ACTION))?.let { handleCanVoltage(it) }
+            registerReceiver(null, IntentFilter(NWD_VOLT_ACTION))?.let { onCanVoltage(it) }
             // com.nwd.kernel.setting listens for this and answers with ACTION_CAN_BATTERY_VOLTAGE,
             // so the pill fills in now instead of after the next 30 s broadcast.
             sendBroadcast(Intent(NWD_VOLT_QUERY_ACTION))
@@ -2023,22 +1484,11 @@ class PanelService : Service() {
 
         // Real K2401 / NWD sources (from the unit's logs).
         const val NWD_VOLT_ACTION = "com.nwd.action.ACTION_CAN_BATTERY_VOLTAGE"
-        const val NWD_VOLT_KEY = "Voltage"
         const val NWD_VOLT_QUERY_ACTION = "com.nwd.action.ACTION_QUERY_CAN_BATTERY_VOLTAGE"
         const val NWD_MUSIC_ACTION = "com.nwd.android.ACTION_STREAM_MUSIC"
         const val MCU_VOLUME_KEY = "mcu_system_volume"
         const val BACKCAR_KEY = "mcu_backcar_state"
         private const val TRIP_GAP_MS = 3 * 60_000L
-        const val ZLINK_ACTION = "com.zjinnova.zlink"
-        const val ZLINK_PKG = "com.zjinnova.zlink"
-        /** Above this the alternator is charging, so the engine is running. */
-        const val ENGINE_ON_VOLTS = 13.0f
-
-        /** Screens the stay-on-screen logic must never bring back (reverse camera). */
-        private val NEVER_RETURN_TO = setOf("com.nwd.backcar")
-        private const val STAY_WINDOW_MS = 10_000L
-        private const val GUARD_MS = 3 * 60_000L
-        private const val USER_OPEN_GRACE_MS = 20_000L
         private const val WEATHER_REFRESH_MS = 20 * 60_000L
         private const val WEATHER_RETRY_MS = 2 * 60_000L
         private const val WEATHER_STALE_MS = 3 * 60 * 60_000L
@@ -2058,17 +1508,6 @@ class PanelService : Service() {
         private val BATT_LABELS = arrayOf("BATTERY", "CHARGING", "BATTERY", "LOW", "CRITICAL")
         private val BATT_ICONS = arrayOf("\u26A1", "\u26A1", "\u25CF", "\u25B2", "!")
 
-        // Fallbacks for other firmware.
-        private val EXTRA_VOLT_PATHS = listOf(
-            "/sys/class/power_supply/axp2202-ac/voltage_now",
-            "/sys/class/power_supply/axp2202-usb/voltage_now",
-            "/sys/class/power_supply/axp2202-battery/voltage_now",
-        )
-        private val VOLT_SETTING_KEYS = listOf(
-            "car_battery_voltage", "battery_voltage", "car_voltage", "voltage_battery",
-            "system_battery_voltage", "mcu_battery_voltage", "battery_vol", "car_vol",
-            "nwd_battery_voltage", "nwd_voltage", "acc_voltage", "power_voltage",
-        )
         private val VOLT_BROADCASTS = listOf(
             "com.nwd.action.BATTERY_VOLTAGE",
             "com.nwd.action.VOLTAGE_CHANGED",
