@@ -74,6 +74,10 @@ object Prefs {
     const val KEY_CUR_TRIP_HB = "pref_cur_trip_hard_brake"
     const val KEY_BATTERY_LOG = "pref_battery_log"
     const val KEY_PERF_RUNS = "pref_perf_runs"
+    const val KEY_CAM_OSM = "pref_cam_osm"
+    const val KEY_CAM_MINE = "pref_cam_mine"
+    const val KEY_CAM_MUTED = "pref_cam_muted"
+    const val KEY_CAM_CHIME = "pref_cam_chime"
     const val KEY_WEATHER_JSON = "pref_weather_json"
     const val KEY_STAY_ON_CONNECT = "pref_stay_on_connect"
     const val KEY_USER_OPENED_ZLINK = "pref_user_opened_zlink_at"
@@ -456,6 +460,26 @@ object Prefs {
     var batteryLog: List<BatteryDay>
         get() = BatteryHealth.decode(sp.getString(KEY_BATTERY_LOG, null))
         set(value) = sp.edit().putString(KEY_BATTERY_LOG, BatteryHealth.encode(value)).apply()
+
+    /** OpenStreetMap camera list (Cameras.encodeSet) as last received from the phone; "" = use the built-in one. */
+    var camOsm: String
+        get() = sp.getString(KEY_CAM_OSM, "") ?: ""
+        set(value) = sp.edit().putString(KEY_CAM_OSM, value).apply()
+
+    /** Cameras the driver marked (Cameras.encode). Backed up. */
+    var camMine: String
+        get() = sp.getString(KEY_CAM_MINE, "") ?: ""
+        set(value) = sp.edit().putString(KEY_CAM_MINE, value).apply()
+
+    /** Cameras the driver muted (Cameras.encode, matched by place). Backed up. */
+    var camMuted: String
+        get() = sp.getString(KEY_CAM_MUTED, "") ?: ""
+        set(value) = sp.edit().putString(KEY_CAM_MUTED, value).apply()
+
+    /** Chime with a camera warning. */
+    var camChime: Boolean
+        get() = sp.getBoolean(KEY_CAM_CHIME, true)
+        set(value) = sp.edit().putBoolean(KEY_CAM_CHIME, value).apply()
 
     /** Timed acceleration runs (0-60, 0-100, 40-80), newest last. */
     var perfRuns: List<PerfRun>

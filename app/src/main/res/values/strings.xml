@@ -186,4 +186,5 @@
     <string name="settings_panel_hint">Draws quick controls in the 170 px black area below the app window</string>
     <string name="settings_stay_on_connect">Stay on current screen when phone connects</string>
     <string name="settings_stay_on_connect_hint">ZLink still connects in the background; open it from its floating button or the Phone Link tile.</string>
+    <string name="camera_mark">Mark a traffic camera here</string>
 </resources>

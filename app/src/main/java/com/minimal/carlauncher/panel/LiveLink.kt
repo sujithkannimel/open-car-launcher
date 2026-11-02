@@ -81,6 +81,15 @@ object LiveLink {
             added = res.added
         }
         var note: String? = null
+        // A newer camera list from the phone (it only sends one when our version differs).
+        got.cams?.let { json ->
+            val set = com.minimal.carlauncher.core.Cameras.decodeSet(json)
+            val old = com.minimal.carlauncher.core.CameraStore.osmSet(context)
+            note = if (set != null && com.minimal.carlauncher.core.CameraStore.replaceOsm(context, set)) {
+                val (added, removed) = com.minimal.carlauncher.core.Cameras.diff(old.cams, set.cams)
+                "cameras updated to ${set.version}: $added new, $removed removed"
+            } else "camera list from the phone refused (${set?.cams?.size ?: "unreadable"})"
+        }
         val update = got.offer?.let { o ->
             fetchUpdate(context, ip, key, o) { note = it }
         }

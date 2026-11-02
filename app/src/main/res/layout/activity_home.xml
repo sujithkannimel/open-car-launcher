@@ -136,6 +136,19 @@
                 android:scaleType="fitCenter"
                 android:src="@drawable/ic_my_location" />
 
+            <!-- Mark a traffic camera at the car's position (shifted below Recenter in code). -->
+            <ImageButton
+                android:id="@+id/btnMarkCamera"
+                android:layout_width="@dimen/map_button_size"
+                android:layout_height="@dimen/map_button_size"
+                android:layout_gravity="end|center_vertical"
+                android:layout_marginEnd="@dimen/map_hud_inset"
+                android:background="@drawable/bg_map_button"
+                android:contentDescription="@string/camera_mark"
+                android:padding="14dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_camera_mark" />
+
             <!-- [4] Speed HUD. Tap toggles KM/H <-> MPH. -->
             <LinearLayout
                 android:id="@+id/gaugeSpeed"

@@ -30,6 +30,8 @@ internal class TripTracker(
     private val engineMaybeRunning: () -> Boolean,
     /** The car just came to a stop (push the parking spot to the phone). */
     private val onStopped: () -> Unit,
+    /** Every fix that passes the accuracy check (camera warnings). */
+    private val onGoodFix: (Location) -> Unit = {},
 ) {
 
     var lastFix: Location? = null
@@ -96,6 +98,7 @@ internal class TripTracker(
         if (!l.hasAccuracy() || l.accuracy > 30f) return
         val p = lastFix
         lastFix = l
+        onGoodFix(l)
         if (p == null) return
         val dt = (l.time - p.time) / 1000.0
         if (dt <= 0.0 || dt > 60.0) return

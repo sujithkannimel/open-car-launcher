@@ -124,7 +124,11 @@ class PanelService : Service() {
             updateBatteryDisplay()
         }
     }
-    private val trips by lazy { TripTracker(this, { volts.engineMaybeRunning() }) { handler.post { liveLinkTick() } } }
+    private val trips by lazy {
+        TripTracker(this, { volts.engineMaybeRunning() }, { handler.post { liveLinkTick() } }) { cameras.onFix(it) }
+    }
+    private val cameras by lazy { CameraWatch(this) }
+    private val cameraChanged: () -> Unit = { updateBatteryDisplay() }
     private val zlink by lazy { ZlinkGuard(this, handler, { ignitionElapsed }, { reversing }) }
     private val cloud by lazy { CloudSync(this, handler) { onPhoneFillsAdded() } }
 
@@ -190,6 +194,8 @@ class PanelService : Service() {
         com.minimal.carlauncher.core.PhoneMedia.kick = { handler.post { liveLinkTick() } }
         com.minimal.carlauncher.core.ZlinkStatus.addListener(playSync)
         com.minimal.carlauncher.core.PhoneMedia.addListener(playSync)
+        com.minimal.carlauncher.core.CameraStore.removeListener(cameraChanged)
+        com.minimal.carlauncher.core.CameraStore.addListener(cameraChanged)
         lastHeartbeatMs = 0L
         tripHeartbeat()
         trips.start()
@@ -247,6 +253,8 @@ class PanelService : Service() {
         zlink.unregister()
         battery.stop()
         trips.stop()
+        com.minimal.carlauncher.core.CameraStore.removeListener(cameraChanged)
+        cameras.release()
         clear()
         log("service destroyed")
         super.onDestroy()
@@ -986,7 +994,17 @@ class PanelService : Service() {
             evaluateBatteryState(volt.removeSuffix("V").toFloatOrNull())
             val icon = BATT_ICONS[shownBattState.coerceAtLeast(0)]
             batteryDisplay?.text = "$icon $volt"
-            tripView?.text = trips.tripText()
+            // A camera warning takes the trip timer's place on the strip (it's on top of every app).
+            val cam = com.minimal.carlauncher.core.CameraStore.current
+            tripView?.apply {
+                if (cam == null) { text = trips.tripText(); setTextColor(Neon.TEXT_2) }
+                else {
+                    val kmh = (trips.lastFix?.speed ?: 0f) * 3.6f
+                    val over = cam.cam.limit > 0 && kmh > cam.cam.limit + 3
+                    text = "\uD83D\uDCF7 " + (if (cam.cam.limit > 0) "${cam.cam.limit} \u00B7 " else "") + "${cam.distanceM} m"
+                    setTextColor(if (over) Neon.RED else Neon.AMBER)
+                }
+            }
         }
     }
 
@@ -1270,6 +1288,7 @@ class PanelService : Service() {
         return com.minimal.carlauncher.core.CarLink.CarExtra(
             appVersion = com.minimal.carlauncher.BuildConfig.VERSION_NAME,
             chargeAlert = chargeAlert,
+            camVer = com.minimal.carlauncher.core.CameraStore.osmSet(this).version,
             pos = fix?.let { com.minimal.carlauncher.core.CarLink.Pos(it.latitude, it.longitude, it.time, if (it.hasSpeed()) it.speed else 0f) },
             diag = diag,
         )

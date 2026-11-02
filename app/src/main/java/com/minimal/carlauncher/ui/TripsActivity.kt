@@ -42,6 +42,7 @@ class TripsActivity : AppCompatActivity() {
         const val TAB_TRIPS = "trips"
         const val TAB_BATTERY = "battery"
         const val TAB_PERF = "perf"
+        const val TAB_CAMS = "cams"
 
         private val BG = Neon.BG
         private val CARD = Neon.SURFACE
@@ -62,6 +63,7 @@ class TripsActivity : AppCompatActivity() {
     private lateinit var tabTrips: TextView
     private lateinit var tabBattery: TextView
     private lateinit var tabPerf: TextView
+    private lateinit var tabCams: TextView
     private var tab = TAB_FUEL
     private val handler = Handler(Looper.getMainLooper())
     private val ticker = object : Runnable {
@@ -89,10 +91,12 @@ class TripsActivity : AppCompatActivity() {
         tabTrips = railButton("Trips") { select(TAB_TRIPS) }
         tabBattery = railButton("Battery") { select(TAB_BATTERY) }
         tabPerf = railButton("0-100") { select(TAB_PERF) }
+        tabCams = railButton("Cameras") { select(TAB_CAMS) }
         rail.addView(tabFuel, LinearLayout.LayoutParams(px(130), px(50)).apply { bottomMargin = px(8) })
         rail.addView(tabTrips, LinearLayout.LayoutParams(px(130), px(50)).apply { bottomMargin = px(8) })
         rail.addView(tabBattery, LinearLayout.LayoutParams(px(130), px(50)).apply { bottomMargin = px(8) })
-        rail.addView(tabPerf, LinearLayout.LayoutParams(px(130), px(50)))
+        rail.addView(tabPerf, LinearLayout.LayoutParams(px(130), px(50)).apply { bottomMargin = px(8) })
+        rail.addView(tabCams, LinearLayout.LayoutParams(px(130), px(50)))
         rail.addView(View(this), LinearLayout.LayoutParams(1, 0, 1f))
         rail.addView(railButton("Close") { finish() }, LinearLayout.LayoutParams(px(130), px(48)))
         root.addView(rail, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT))
@@ -128,6 +132,7 @@ class TripsActivity : AppCompatActivity() {
         styleRail(tabTrips, t == TAB_TRIPS)
         styleRail(tabBattery, t == TAB_BATTERY)
         styleRail(tabPerf, t == TAB_PERF)
+        styleRail(tabCams, t == TAB_CAMS)
         render()
     }
 
@@ -137,6 +142,7 @@ class TripsActivity : AppCompatActivity() {
             TAB_FUEL -> renderFuel()
             TAB_BATTERY -> renderBattery()
             TAB_PERF -> renderPerf()
+            TAB_CAMS -> renderCams()
             else -> renderTrips()
         }
     }
@@ -604,6 +610,43 @@ class TripsActivity : AppCompatActivity() {
         content.addView(card(chg, px(140)))
         content.addView(hint("Healthy: resting 12.4 V or more; charging 13.2 - 15.0 V. Read at the head unit's power wire, " +
             "about 0.1 - 0.2 V below the battery terminals. For the most telling resting value, check the first start of the day."))
+    }
+
+    // ================================================================== cameras
+
+    private fun renderCams() {
+        val cs = com.minimal.carlauncher.core.CameraStore
+        val set = cs.osmSet(this)
+        val mine = cs.mine(); val muted = cs.muted()
+        content.addView(title("Traffic cameras"))
+        val updated = set.fetchedAt.takeIf { it > 0 }?.let { SimpleDateFormat("d MMM yyyy", Locale.US).format(Date(it)) } ?: "-"
+        content.addView(statRow(listOf(
+            Stat("${set.cams.size}", "FROM OPENSTREETMAP · ${if (set.version.endsWith("seed")) "BUILT-IN" else "UPDATED $updated"}", CYAN),
+            Stat("${mine.size}", "MARKED BY YOU", PINK),
+            Stat("${muted.size}", "MUTED", TEXT),
+        )))
+        content.addView(buttonRow(listOf(
+            (if (Prefs.camChime) "Chime: on" else "Chime: off") to { Prefs.camChime = !Prefs.camChime; render() },
+        )))
+        content.addView(hint("A warning shows on the bottom strip and under the speed about 400 m before a camera ahead " +
+            "(600 m above 80 km/h), amber, or red when you're over its limit. Tap the speed twice during a warning to mute that camera. " +
+            "The map's camera button marks one where you are. The phone app refreshes the OpenStreetMap list for all of Kerala every week " +
+            "and sends it over the live link; your marks and mutes are kept and backed up."))
+
+        content.addView(section("Marked by you"))
+        if (mine.isEmpty()) content.addView(body("None yet."))
+        val fmt = SimpleDateFormat("d MMM, HH:mm", Locale.US)
+        mine.sortedByDescending { it.id }.forEach { c ->
+            val at = c.id.removePrefix("me:").toLongOrNull()?.let { fmt.format(Date(it)) } ?: c.id
+            content.addView(body(String.format(Locale.US, "%s   %.5f, %.5f", at, c.lat, c.lon)))
+            content.addView(buttonRow(listOf("Remove" to { cs.removeMine(c.id); render() })))
+        }
+        content.addView(section("Muted"))
+        if (muted.isEmpty()) content.addView(body("None."))
+        muted.forEach { c ->
+            content.addView(body(String.format(Locale.US, "%s camera   %.5f, %.5f", c.kind.uppercase(Locale.US), c.lat, c.lon)))
+            content.addView(buttonRow(listOf("Unmute" to { cs.unmute(c.id); render() })))
+        }
     }
 
     // ================================================================== performance

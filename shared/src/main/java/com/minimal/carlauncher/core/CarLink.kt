@@ -71,6 +71,8 @@ object CarLink {
         val npArtKey: String = "",
         /** A tap on the car's music controls, for the phone's player. */
         val cmd: Cmd? = null,
+        /** Version of the camera list the car has, so the phone only sends a newer one. */
+        val camVer: String = "",
     )
 
     /** Player command: play, pause, next, prev, seek (value = ms), queue (value = queue item id). */
@@ -121,6 +123,7 @@ object CarLink {
         .put("diag", extra.diag ?: JSONObject.NULL)
         .put("nak", extra.npArtKey)
         .put("cmd", extra.cmd?.let { JSONObject().put("id", it.id).put("a", it.action).put("v", it.value) } ?: JSONObject.NULL)
+        .put("cv", extra.camVer)
         .toString()
 
     data class CarMsg(
@@ -145,6 +148,7 @@ object CarLink {
                 if (o.isNull("diag")) null else o.optString("diag"),
                 o.optString("nak"),
                 o.optJSONObject("cmd")?.let { Cmd(it.getLong("id"), it.getString("a"), it.optLong("v")) },
+                o.optString("cv"),
             ),
         )
     } catch (_: Exception) {
@@ -155,15 +159,19 @@ object CarLink {
     data class Offer(val version: String, val size: Long, val sha256: String)
 
     /** [adb]: the phone's ADB bridge is on - the car keeps a tunnel to its own adbd open. */
-    data class PhoneMsg(val fills: List<InboxFill>, val offer: Offer?, val np: NowPlaying? = null, val adb: Boolean = false)
+    /** [cams]: a newer camera list (Cameras.encodeSet) when the car's version differs. */
+    data class PhoneMsg(val fills: List<InboxFill>, val offer: Offer?, val np: NowPlaying? = null, val adb: Boolean = false,
+                        val cams: String? = null)
 
     /** Phone -> car: fill-ups the car hasn't acknowledged yet, an update if the phone has one, what plays. */
-    fun phoneMessage(fills: List<InboxFill>, now: Long, offer: Offer? = null, np: NowPlaying? = null, adb: Boolean = false): String = JSONObject()
+    fun phoneMessage(fills: List<InboxFill>, now: Long, offer: Offer? = null, np: NowPlaying? = null, adb: Boolean = false,
+                     cams: String? = null): String = JSONObject()
         .put("k", "phone").put("t", now)
         .put("fills", JSONArray(fills.map { JSONObject(it.toJson()) }))
         .put("offer", offer?.let { JSONObject().put("ver", it.version).put("size", it.size).put("sha", it.sha256) } ?: JSONObject.NULL)
         .put("np", np?.let { npToJson(it) } ?: JSONObject.NULL)
         .put("adb", adb)
+        .put("cams", cams ?: JSONObject.NULL)
         .toString()
 
     fun parsePhone(text: String, now: Long): PhoneMsg? = try {
@@ -174,6 +182,7 @@ object CarLink {
             o.optJSONObject("offer")?.let { Offer(it.getString("ver"), it.getLong("size"), it.getString("sha")) },
             o.optJSONObject("np")?.let { npFromJson(it) },
             o.optBoolean("adb", false),
+            if (o.isNull("cams")) null else o.optString("cams").ifEmpty { null },
         )
     } catch (_: Exception) {
         null

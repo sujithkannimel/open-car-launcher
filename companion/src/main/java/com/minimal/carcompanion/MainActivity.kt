@@ -207,6 +207,7 @@ class MainActivity : Activity() {
         super.onResume()
         LinkStore.addListener(liveListener)
         subtitle.postDelayed(ticker, 15_000)
+        CameraUpdater.maybeFetch(this)       // first list right after install, then weekly
     }
 
     override fun onPause() {
@@ -752,6 +753,22 @@ class MainActivity : Activity() {
             text = "Head unit diagnostics"
             setTextColor(CYAN); textSize = 14f; setPadding(0, px(4), 0, px(8))
             setOnClickListener { showDiagnostics() }
+        })
+        col.addView(TextView(this).apply {
+            fun label(): String {
+                val set = CameraUpdater.set(this@MainActivity)
+                val err = CameraUpdater.lastError(this@MainActivity)
+                return "Traffic cameras: " + (set?.let { "${it.cams.size} · updated " + SimpleDateFormat("d MMM", Locale.US).format(Date(it.fetchedAt)) } ?: "not downloaded yet") +
+                    (if (err.isNotEmpty()) " (last try failed)" else "") + "  \u00B7  Update now"
+            }
+            text = label()
+            setTextColor(CYAN); textSize = 14f; setPadding(0, px(4), 0, px(8))
+            setOnClickListener {
+                text = "Traffic cameras: updating..."
+                CameraUpdater.fetchNow(this@MainActivity) { msg ->
+                    runOnUiThread { text = label(); Toast.makeText(this@MainActivity, "Cameras: $msg", Toast.LENGTH_LONG).show() }
+                }
+            }
         })
         col.addView(TextView(this).apply {
             fun label() = if (AdbBridge.isOn()) "ADB bridge: ON until " + timeFmt.format(Date(AdbBridge.until)) + " (tap to turn off)"

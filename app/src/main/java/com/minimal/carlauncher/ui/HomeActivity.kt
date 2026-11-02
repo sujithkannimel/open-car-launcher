@@ -118,6 +118,7 @@ class HomeActivity : AppCompatActivity() {
     private fun bindDashboardClicks() {
         binding.gaugeSpeed.setOnClickListener { view ->
             val state = viewModel.vehicle.value
+            if (com.minimal.carlauncher.core.CameraStore.current != null) { muteTap(); return@setOnClickListener }
             when {
                 !state.permissionGranted -> requestLocation()
                 !state.gpsEnabled -> IntentUtil.openLocationSettings(this)
@@ -129,6 +130,18 @@ class HomeActivity : AppCompatActivity() {
             }
         }
         binding.gaugeClock.setOnClickListener { openClock() }
+        // Mark a traffic camera where the car is now. Sits just below Recenter.
+        binding.btnMarkCamera.post { binding.btnMarkCamera.translationY = binding.btnMarkCamera.height * 1.25f }
+        binding.btnMarkCamera.setOnClickListener { view ->
+            val p = com.minimal.carlauncher.core.CameraStore.lastPos
+            if (p == null || System.currentTimeMillis() - p.third > 15_000L) {
+                Toast.makeText(this, "No GPS fix yet - try again in a moment", Toast.LENGTH_SHORT).show()
+            } else {
+                view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                com.minimal.carlauncher.core.CameraStore.mark(p.first, p.second)
+                Toast.makeText(this, "Camera marked here. Remove it in Trips \u2192 Cameras.", Toast.LENGTH_SHORT).show()
+            }
+        }
         // Long-press the speed: timed acceleration runs.
         binding.gaugeSpeed.setOnLongClickListener {
             startActivity(android.content.Intent(this, TripsActivity::class.java)
@@ -242,6 +255,24 @@ class HomeActivity : AppCompatActivity() {
 
     // ------------------------------------------------------------- dashboard render
 
+    private var muteArmedUntil = 0L
+
+    /** Tap the speed during a camera warning: a second tap within 4 s mutes that camera. */
+    private fun muteTap() {
+        val cam = com.minimal.carlauncher.core.CameraStore.current?.cam ?: return
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now < muteArmedUntil) {
+            muteArmedUntil = 0L
+            com.minimal.carlauncher.core.CameraStore.mute(cam)
+            Toast.makeText(this, "Camera muted. Unmute it in Trips \u2192 Cameras.", Toast.LENGTH_SHORT).show()
+        } else {
+            muteArmedUntil = now + 4_000L
+            Toast.makeText(this, "Tap again to mute this camera", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private val cameraListener: () -> Unit = { render(viewModel.vehicle.value) }
+
     private var perfShownUntil = 0L
     private var statusColor = 0
 
@@ -297,24 +328,33 @@ class HomeActivity : AppCompatActivity() {
             if (!state.hasFix || state.speedMps < com.minimal.carlauncher.core.Constants.SPEED_NOISE_GATE_MPS) 0f
             else state.speedMps * 3.6f)
         binding.textSpeedUnit.text = Format.unitLabel(unit)
-        if (android.os.SystemClock.elapsedRealtime() >= perfShownUntil) binding.textSpeedStatus.setText(
-            when {
-                !state.permissionGranted -> R.string.gps_permission_needed
-                !state.gpsEnabled -> R.string.gps_disabled
-                !state.hasFix -> R.string.gps_acquiring
-                else -> R.string.gps_lock
-            }
-        )
-        binding.textSpeedStatus.setTextColor(
-            ContextCompat.getColor(
-                this,
+        val cam = com.minimal.carlauncher.core.CameraStore.current
+        if (cam != null) {
+            val kmh = if (state.hasFix) state.speedMps * 3.6f else 0f
+            val over = cam.cam.limit > 0 && kmh > cam.cam.limit + 3
+            binding.textSpeedStatus.text = (if (cam.cam.kind == "speed") "SPEED CAMERA" else if (cam.cam.kind == "user") "CAMERA" else "AI CAMERA") +
+                (if (cam.cam.limit > 0) " ${cam.cam.limit}" else "") + " \u00B7 ${cam.distanceM} M"
+            binding.textSpeedStatus.setTextColor(if (over) com.minimal.carlauncher.core.Neon.RED else com.minimal.carlauncher.core.Neon.AMBER)
+        } else if (android.os.SystemClock.elapsedRealtime() >= perfShownUntil) {
+            binding.textSpeedStatus.setText(
                 when {
-                    !state.permissionGranted || !state.gpsEnabled -> R.color.cockpit_badge
-                    !state.hasFix -> R.color.cockpit_warn
-                    else -> R.color.cockpit_ok
+                    !state.permissionGranted -> R.string.gps_permission_needed
+                    !state.gpsEnabled -> R.string.gps_disabled
+                    !state.hasFix -> R.string.gps_acquiring
+                    else -> R.string.gps_lock
                 }
             )
-        )
+            binding.textSpeedStatus.setTextColor(
+                ContextCompat.getColor(
+                    this,
+                    when {
+                        !state.permissionGranted || !state.gpsEnabled -> R.color.cockpit_badge
+                        !state.hasFix -> R.color.cockpit_warn
+                        else -> R.color.cockpit_ok
+                    }
+                )
+            )
+        }
 
         map.render(state)
 
@@ -406,6 +446,7 @@ class HomeActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         com.minimal.carlauncher.core.PerfLive.listener = { run, best -> showPerf(run, best) }
+        com.minimal.carlauncher.core.CameraStore.addListener(cameraListener)
         viewModel.start()
         map.onResume()
         app.radioRepository.start()
@@ -467,6 +508,7 @@ class HomeActivity : AppCompatActivity() {
     override fun onPause() {
         super.onPause()
         com.minimal.carlauncher.core.PerfLive.listener = null
+        com.minimal.carlauncher.core.CameraStore.removeListener(cameraListener)
         // Unregister the moment anything else comes to the foreground - this process is alive
         // for as long as the head unit is powered.
         viewModel.stop()

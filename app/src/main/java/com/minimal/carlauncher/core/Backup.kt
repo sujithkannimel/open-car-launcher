@@ -23,6 +23,7 @@ object Backup {
         Prefs.KEY_TRIP_START, Prefs.KEY_TRIP_LAST_SEEN, Prefs.KEY_TRIP_LAST_GPS,
         Prefs.KEY_CUR_TRIP_GPS, Prefs.KEY_CUR_TRIP_DRIVE, Prefs.KEY_CUR_TRIP_IDLE, Prefs.KEY_CUR_TRIP_MAX, Prefs.KEY_CUR_TRIP_HWY,
         Prefs.KEY_CUR_TRIP_HA, Prefs.KEY_CUR_TRIP_HB,
+        Prefs.KEY_CAM_OSM,          // re-fetched by the phone; keeps the backup and link messages small
         Prefs.KEY_USER_OPENED_ZLINK, Prefs.KEY_LAST_AUTO_BACKUP,
         // Secrets and cloud bookkeeping: never written into a backup file.
         Prefs.KEY_CLOUD_REPO, Prefs.KEY_CLOUD_TOKEN, Prefs.KEY_CLOUD_PASS,

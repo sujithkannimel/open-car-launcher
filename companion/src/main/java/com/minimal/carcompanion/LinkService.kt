@@ -50,7 +50,7 @@ class LinkService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     private val summaryCheck = object : Runnable {
-        override fun run() { checkSummaries(); main.postDelayed(this, 30 * 60_000L) }
+        override fun run() { checkSummaries(); CameraUpdater.maybeFetch(this@LinkService); main.postDelayed(this, 30 * 60_000L) }
     }
 
     override fun onCreate() {
@@ -136,6 +136,24 @@ class LinkService : Service() {
     }
 
     @Volatile private var lastOfferNote = 0L
+    @Volatile private var camSentVer = ""
+    @Volatile private var camSentAt = 0L
+
+    /**
+     * The camera list for the car when its version differs from ours (it says which it has);
+     * at most every 10 min per car version, in case the car keeps refusing it. Cars too old to
+     * report a version get nothing.
+     */
+    private fun camerasFor(carVer: String, now: Long): String? {
+        if (carVer.isEmpty()) return null
+        val json = CameraUpdater.setJson(this) ?: return null
+        val ours = CameraUpdater.set(this)?.version ?: return null
+        if (ours == carVer) return null
+        if (camSentVer == carVer && now - camSentAt < 10 * 60_000L) return null
+        camSentVer = carVer; camSentAt = now
+        LinkStore.note(this, "sending camera list $ours to the car (car has $carVer)")
+        return json
+    }
 
     private fun handle(s: Socket) {
         var keepOpen = false
@@ -182,7 +200,8 @@ class LinkService : Service() {
                 // The car's music buttons drive the phone's player; then report what plays.
                 msg.extra.cmd?.let { PhoneMedia.run(this, it) }
                 val np = if (LinkStore.mediaOn(this)) PhoneMedia.nowPlaying(this, msg.extra.npArtKey) else null
-                val reply = CarLink.seal(key, CarLink.phoneMessage(LinkStore.localFills(this), now, offer, np, AdbBridge.isOn(now)))
+                val cams = camerasFor(msg.extra.camVer, now)
+                val reply = CarLink.seal(key, CarLink.phoneMessage(LinkStore.localFills(this), now, offer, np, AdbBridge.isOn(now), cams))
                 s.getOutputStream().apply { write((reply + "\n").toByteArray()); flush() }
                 LinkStore.saveLive(this, msg, s.inetAddress?.hostAddress.orEmpty())
                 main.post {
