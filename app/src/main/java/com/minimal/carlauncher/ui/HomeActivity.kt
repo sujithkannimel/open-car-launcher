@@ -344,6 +344,12 @@ class HomeActivity : AppCompatActivity() {
                     else -> R.string.gps_lock
                 }
             )
+            // While searching, show how many satellites it sees: 0 under a roof, climbing in the open.
+            if (state.permissionGranted && state.gpsEnabled && !state.hasFix) {
+                com.minimal.carlauncher.core.GnssInfo.label().takeIf { it.isNotEmpty() }?.let {
+                    binding.textSpeedStatus.text = getString(R.string.gps_acquiring) + " \u00B7 " + it
+                }
+            }
             binding.textSpeedStatus.setTextColor(
                 ContextCompat.getColor(
                     this,

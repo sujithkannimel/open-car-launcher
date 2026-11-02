@@ -51,6 +51,22 @@ internal class TripTracker(
     private var lastFlush = 0L
     private val perf = PerfTimer()
 
+    private var startedAt = 0L
+    private var firstFixLogged = false
+
+    /** Satellite counts for the "acquiring" readout, and how long the first fix took (in the log). */
+    private val gnss = object : android.location.GnssStatus.Callback() {
+        override fun onSatelliteStatusChanged(status: android.location.GnssStatus) {
+            var used = 0
+            for (i in 0 until status.satelliteCount) if (status.usedInFix(i)) used++
+            com.minimal.carlauncher.core.GnssInfo.used = used
+            com.minimal.carlauncher.core.GnssInfo.visible = status.satelliteCount
+        }
+        override fun onFirstFix(ttffMillis: Int) {
+            log("gps: first fix after ${ttffMillis / 1000} s (${com.minimal.carlauncher.core.GnssInfo.label()})")
+        }
+    }
+
     private val listener = object : LocationListener {
         override fun onLocationChanged(l: Location) = onFix(l)
         @Deprecated("framework")
@@ -80,6 +96,8 @@ internal class TripTracker(
             val m = context.getSystemService(LocationManager::class.java) ?: return
             m.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, listener, Looper.getMainLooper())
             locMgr = m
+            startedAt = SystemClock.elapsedRealtime()
+            try { m.registerGnssStatusCallback(gnss, android.os.Handler(Looper.getMainLooper())) } catch (_: Exception) {}
         } catch (e: Exception) {
             log("gps odometer failed: $e")
         }
@@ -88,6 +106,7 @@ internal class TripTracker(
     /** Stops GPS and saves everything counted so far. */
     fun stop() {
         try { locMgr?.removeUpdates(listener) } catch (_: Exception) {}
+        try { locMgr?.unregisterGnssStatusCallback(gnss) } catch (_: Exception) {}
         locMgr = null
         if (pendingKm > 0) { Prefs.gpsOdoKm = Prefs.gpsOdoKm + pendingKm; pendingKm = 0.0 }
         flush(force = true)
@@ -95,6 +114,11 @@ internal class TripTracker(
 
     /** Adds distance between good fixes; drops noisy, stale, parked and impossible jumps. */
     private fun onFix(l: Location) {
+        if (!firstFixLogged && startedAt > 0L) {
+            firstFixLogged = true
+            log(String.format(Locale.US, "gps: lock %d s after start, \u00B1%.0f m, %s",
+                (SystemClock.elapsedRealtime() - startedAt) / 1000, l.accuracy, com.minimal.carlauncher.core.GnssInfo.label()))
+        }
         if (!l.hasAccuracy() || l.accuracy > 30f) return
         val p = lastFix
         lastFix = l

@@ -1281,7 +1281,7 @@ class PanelService : Service() {
             appendLine("App in front: ${ZlinkGuard.topApp(this@PanelService) ?: "-"}")
             appendLine("Cloud: ${Prefs.cloudStatus.ifEmpty { "-" }}")
             appendLine("Phone link: ${Prefs.linkPhone.ifEmpty { "-" }}")
-            appendLine("GPS: ${if (fix == null) "no fix" else String.format(Locale.US, "±%.0f m", fix.accuracy)}")
+            appendLine("GPS: ${if (fix == null) "no fix" else String.format(Locale.US, "±%.0f m", fix.accuracy)}  ${com.minimal.carlauncher.core.GnssInfo.label()}")
             appendLine()
             append(getSharedPreferences("panel_log", Context.MODE_PRIVATE).getString("log", "") ?: "")
         }
