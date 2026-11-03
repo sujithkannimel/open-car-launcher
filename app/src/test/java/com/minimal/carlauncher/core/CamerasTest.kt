@@ -13,12 +13,16 @@ class CamerasTest {
       {"type":"node","id":1,"lat":8.5000,"lon":76.9000,"tags":{"man_made":"surveillance","name":"KL-KEL-KMVD-50-AICS-01-1"}},
       {"type":"node","id":2,"lat":8.50001,"lon":76.90001,"tags":{"highway":"speed_camera","maxspeed":"50"}},
       {"type":"node","id":3,"lat":8.6000,"lon":76.9500,"tags":{"man_made":"surveillance","name":"KL-KEL-KMVD-50-PVDS-01-2"}},
-      {"type":"node","id":4,"lat":8.7000,"lon":76.9800,"tags":{"man_made":"surveillance","name":"KL-KEL-KMVD-50-SVDS-01-3"}}
+      {"type":"node","id":4,"lat":8.7000,"lon":76.9800,"tags":{"man_made":"surveillance","name":"KL-KEL-KMVD-50-SVDS-01-3"}},
+      {"type":"node","id":5,"lat":8.8000,"lon":76.9000,"tags":{"man_made":"surveillance","name":"SBI ATM"}},
+      {"type":"node","id":6,"lat":8.9000,"lon":76.9000,"tags":{"man_made":"surveillance","surveillance:type":"camera"}},
+      {"type":"node","id":7,"lat":9.0000,"lon":76.9000,"tags":{"man_made":"surveillance","operator":"Kerala Police"}}
     ]}"""
 
     @Test fun parsesKindsDropsParkingAndMergesDuplicates() {
         val c = Cameras.fromOverpass(overpass)
-        assertEquals(2, c.size)                                       // 1 and 2 are the same spot; 3 is parking
+        assertEquals(3, c.size)                                       // 1+2 same spot; 3 parking; 5 ATM and 6 private CCTV dropped
+        assertTrue(c.any { it.id == "osm:7" })                         // police-operated counts
         val merged = c.first { it.lat < 8.55 }
         assertEquals("osm:2", merged.id); assertEquals("speed", merged.kind); assertEquals(50, merged.limit)
         assertEquals("speed", c.first { it.id == "osm:4" }.kind)       // SVDS = speed violation detection

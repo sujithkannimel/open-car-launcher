@@ -22,7 +22,9 @@ object CameraUpdater {
     private const val RETRY_MS = 24L * 60 * 60_000L
     private val SERVERS = listOf(
         "https://overpass-api.de/api/interpreter",
+        "https://overpass.private.coffee/api/interpreter",
         "https://overpass.kumi.systems/api/interpreter",
+        "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
     )
     @Volatile private var busy = false
 
@@ -57,26 +59,31 @@ object CameraUpdater {
     private fun fetch(c: Context): String {
         sp(c).edit().putLong("tryAt", System.currentTimeMillis()).apply()
         val body = "data=" + URLEncoder.encode(Cameras.overpassQuery(), "UTF-8")
-        var lastErr = "no server answered"
+        val errors = ArrayList<String>()
         for (url in SERVERS) {
-            val json = try { post(url, body) } catch (e: Exception) { lastErr = "${hostOf(url)}: ${e.javaClass.simpleName}"; null } ?: continue
-            val cams = try { Cameras.fromOverpass(json) } catch (_: Exception) { lastErr = "${hostOf(url)}: unreadable reply"; continue }
+            val json = try { post(url, body) } catch (e: Exception) {
+                errors += "${hostOf(url)}: " + (if (e is java.net.SocketTimeoutException) "timed out" else e.message ?: e.javaClass.simpleName); null
+            } ?: continue
+            val cams = try { Cameras.fromOverpass(json) } catch (_: Exception) {
+                errors += "${hostOf(url)}: " + (if (json.contains("<html", true)) "busy (sent an error page)" else "unreadable reply"); continue
+            }
             val old = set(c)?.cams.orEmpty()
-            if (!Cameras.saneReplacement(cams, old)) { lastErr = "only ${cams.size} cameras returned - kept the old list"; continue }
+            if (!Cameras.saneReplacement(cams, old)) { errors += "${hostOf(url)}: only ${cams.size} cameras - kept the old list"; continue }
             val day = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
             val s = CameraSet(Cameras.versionOf(day, cams), System.currentTimeMillis(), cams)
             val (added, removed) = Cameras.diff(old, cams)
             sp(c).edit().putString("set", Cameras.encodeSet(s)).putString("err", "").apply()
             return "${cams.size} cameras ($added new, $removed removed)"
         }
-        sp(c).edit().putString("err", lastErr).apply()
-        return "Failed: $lastErr"
+        val err = errors.joinToString("; ").ifEmpty { "no server answered" }
+        sp(c).edit().putString("err", err).apply()
+        return "Failed: $err"
     }
 
     private fun post(url: String, body: String): String? {
         val con = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"; doOutput = true
-            connectTimeout = 20_000; readTimeout = 120_000
+            connectTimeout = 20_000; readTimeout = 240_000      // a whole-state query can take ~2 min
             // Overpass refuses anonymous clients.
             setRequestProperty("User-Agent", "CarCompanion (personal car app; traffic camera warnings)")
             setRequestProperty("Content-Type", "application/x-www-form-urlencoded")

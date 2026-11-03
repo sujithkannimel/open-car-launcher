@@ -28,19 +28,29 @@ object Cameras {
     const val KERALA_BBOX = "8.17,74.85,12.80,77.45"
 
     /**
-     * Overpass query for traffic cameras: speed cameras, and surveillance cameras that are
-     * clearly traffic enforcement (the MVD's KL-KEL-KMVD ids, Keltron AI, traffic zone, an
-     * MVD / police operator). Shop, ATM and private CCTV are left out.
+     * Overpass query: every speed camera and every surveillance camera in Kerala. Plain tag
+     * matches only - name regexes over a whole state make the server take minutes - and the
+     * traffic ones are picked out here, in [fromOverpass].
      */
     fun overpassQuery(bbox: String = KERALA_BBOX): String =
-        "[out:json][timeout:90];(" +
+        "[out:json][timeout:180];(" +
             "node[highway=speed_camera]($bbox);" +
-            "node[man_made=surveillance][name~\"KMVD|Keltron|AI ?Cam\",i]($bbox);" +
-            "node[man_made=surveillance][\"surveillance:zone\"=traffic]($bbox);" +
-            "node[man_made=surveillance][operator~\"MVD|Motor Vehicle|Keltron|Police\",i]($bbox);" +
+            "node[man_made=surveillance]($bbox);" +
             ");out body;"
 
-    /** Parses an Overpass JSON reply into cameras: kinds assigned, parking ones dropped, duplicates merged. */
+    private val TRAFFIC_NAME = Regex("KMVD|Keltron|AI ?Cam", RegexOption.IGNORE_CASE)
+    private val TRAFFIC_OPERATOR = Regex("MVD|Motor Vehicle|Keltron|Police", RegexOption.IGNORE_CASE)
+
+    /** A speed camera, or a surveillance camera that is clearly traffic enforcement (not shop, ATM or home CCTV). */
+    fun isTraffic(tags: JSONObject): Boolean {
+        if (tags.optString("highway") == "speed_camera") return true
+        if (tags.optString("man_made") != "surveillance") return false
+        return TRAFFIC_NAME.containsMatchIn(tags.optString("name")) ||
+            tags.optString("surveillance:zone") == "traffic" ||
+            TRAFFIC_OPERATOR.containsMatchIn(tags.optString("operator"))
+    }
+
+    /** Parses an Overpass JSON reply into cameras: traffic ones only, kinds assigned, parking ones dropped, duplicates merged. */
     fun fromOverpass(json: String): List<Camera> {
         val els = JSONObject(json).getJSONArray("elements")
         val out = ArrayList<Camera>()
@@ -48,6 +58,7 @@ object Cameras {
             val e = els.getJSONObject(i)
             if (e.optString("type") != "node" || !e.has("lat")) continue
             val tags = e.optJSONObject("tags") ?: JSONObject()
+            if (!isTraffic(tags)) continue
             val name = tags.optString("name")
             if (name.contains("PVDS")) continue                       // parking enforcement: not for drivers on the move
             val speed = tags.optString("highway") == "speed_camera" || name.contains("SVDS")
