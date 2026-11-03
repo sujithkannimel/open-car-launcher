@@ -23,8 +23,8 @@ android {
         // NOTE: deliberately NOT targetSdk 36. Android 16 ignores android:screenOrientation for
         // apps targeting 36 on displays with smallestWidth >= 600dp - which is exactly a head unit.
         targetSdk = 35
-        versionCode = 50
-        versionName = "0.50"
+        versionCode = 51
+        versionName = "0.51"
 
         // TODO: point these at the repository that hosts the release APKs.
         buildConfigField("String", "GITHUB_OWNER", "\"sujithkannimel\"")
@@ -61,7 +61,9 @@ android {
             }
         }
         debug {
-            signingConfig = signingConfigs.getByName("debug")
+            // The private key when CI provides one (keystore.properties), so the shipped
+            // build is signed with it; otherwise the fixed debug key as before.
+            signingConfig = signingConfigs.getByName(if (keystoreProps.isNotEmpty()) "release" else "debug")
             // No applicationIdSuffix on purpose: a debug install must be upgradable by a release APK.
             isMinifyEnabled = false
         }

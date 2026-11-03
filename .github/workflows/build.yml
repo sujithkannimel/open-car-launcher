@@ -132,32 +132,29 @@ jobs:
           keyPassword=${{ secrets.KEY_PASSWORD }}
           EOF
 
-      - name: Assemble signed release APK
-        if: steps.signing.outputs.signed == 'true'
+      # Same build type as always (no shrinking), so behaviour doesn't change - only the
+      # signature: the private key when the secrets exist, else the old fixed debug key.
+      - name: Assemble APKs
         run: |
-          gradle --no-daemon :app:assembleRelease
+          gradle --no-daemon :app:assembleDebug :companion:assembleDebug
           mkdir -p dist
-          cp app/build/outputs/apk/release/app-release.apk \
-             "dist/car-launcher-${{ steps.tag.outputs.name }}.apk"
-
-      - name: Assemble debug APK (unsigned release fallback)
-        if: steps.signing.outputs.signed != 'true'
-        run: |
-          gradle --no-daemon :app:assembleDebug
-          mkdir -p dist
-          cp app/build/outputs/apk/debug/app-debug.apk \
-             "dist/car-launcher-${{ steps.tag.outputs.name }}-release.apk"
           # The name must contain "release": head units on v0.24 or older pick the first
           # APK otherwise, which is the phone companion (alphabetically first).
-
-      # Phone companion app ships in the same release (the launcher's updater skips it).
-      - name: Assemble companion APK
-        run: |
-          gradle --no-daemon :companion:assembleDebug
-          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk "dist/car-launcher-${{ steps.tag.outputs.name }}-release.apk"
           # Named after the companion's own version, which its update check reads.
           CV=$(sed -n 's/.*versionName *= *"\([^"]*\)".*/\1/p' companion/build.gradle.kts | head -1)
           cp companion/build/outputs/apk/debug/companion-debug.apk "dist/car-companion-${CV}.apk"
+
+      # Which key signed this release, for checking on the devices (SHA-256 of the certificate).
+      - name: Signing fingerprint
+        id: fp
+        run: |
+          if [ -f release.jks ]; then
+            FP=$(keytool -list -v -keystore release.jks -storepass "${{ secrets.KEYSTORE_PASSWORD }}" -alias "${{ secrets.KEY_ALIAS }}" | grep -m1 "SHA256:" | sed 's/.*SHA256: *//')
+            echo "text=Signed with the private release key (SHA-256 ${FP})." >> "$GITHUB_OUTPUT"
+          else
+            echo "text=Signed with the old public debug key (no release key configured yet)." >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
@@ -168,7 +165,7 @@ jobs:
           generate_release_notes: true
           prerelease: ${{ startsWith(steps.tag.outputs.name, 'v0.') }}
           body: |
-            ${{ steps.signing.outputs.signed == 'true' && 'Signed release build.' || 'Signed with the project''s fixed debug key: installs over any previous build from this repo, and the in-app updater can upgrade to it.' }}
+            ${{ steps.fp.outputs.text }}
 
       - name: Clean up signing material
         if: always()
