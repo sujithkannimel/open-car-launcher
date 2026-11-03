@@ -174,7 +174,7 @@ class MainActivity : Activity() {
         // Cached data first (cloud or live from the car), so the app opens instantly offline.
         data = LinkStore.cached(this)?.let { withAllPending(it, emptyList()) }
         select(TAB_HOME)
-        if (token.isEmpty()) settings() else refresh()
+        if (token.isEmpty()) cloudSettings() else refresh()
         checkForUpdate()
         LinkService.start(this)
         if (Build.VERSION.SDK_INT >= 33 &&
@@ -704,7 +704,7 @@ class MainActivity : Activity() {
 
     private fun refresh() {
         if (loading) return
-        if (token.isEmpty()) { settings(); return }
+        if (token.isEmpty()) { cloudSettings(); return }
         loading = true
         render()
         val r = repoName; val t = token; val p = passphrase
@@ -731,7 +731,77 @@ class MainActivity : Activity() {
         }.start()
     }
 
+    /** The gear: app tools and switches. Each takes effect at once; the cloud fields have their own dialog. */
     private fun settings() {
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(px(22), px(8), px(22), 0) }
+        fun link(t: String, top: Int = 4, onClick: TextView.() -> Unit) = TextView(this).apply {
+            text = t; setTextColor(CYAN); textSize = 15f; setPadding(0, px(top), 0, px(10))
+            setOnClickListener { onClick() }
+        }.also { col.addView(it) }
+
+        col.addView(small("Live link"))
+        col.addView(android.widget.CheckBox(this).apply {
+            text = "Live link with the car (no internet needed)"
+            isChecked = LinkStore.enabled(this@MainActivity)
+            setTextColor(TEXT)
+            setOnCheckedChangeListener { _, on ->
+                LinkStore.setEnabled(this@MainActivity, on)
+                if (on) LinkService.start(this@MainActivity) else LinkService.stop(this@MainActivity)
+            }
+        })
+        col.addView(android.widget.CheckBox(this).apply {
+            text = "Show the phone's song on the car"
+            isChecked = LinkStore.mediaOn(this@MainActivity)
+            setTextColor(TEXT)
+            setOnCheckedChangeListener { _, on -> LinkStore.setMediaOn(this@MainActivity, on) }
+        })
+        col.addView(small(if (LinkStore.key(this) == null) "Waiting for the car to share its link key (needs the car online once)."
+            else "Ready. The car sends data straight to this phone on home Wi-Fi and during Android Auto."))
+
+        col.addView(small("Car"))
+        fun camLabel(): String {
+            val set = CameraUpdater.set(this@MainActivity)
+            val err = CameraUpdater.lastError(this@MainActivity)
+            return "Traffic cameras: " + (set?.let { "${it.cams.size} \u00B7 updated " + SimpleDateFormat("d MMM", Locale.US).format(Date(it.fetchedAt)) } ?: "not downloaded yet") +
+                (if (err.isNotEmpty()) " (last try failed)" else "") + "  \u00B7  Update now"
+        }
+        link(camLabel()) {
+            text = "Traffic cameras: updating..."
+            CameraUpdater.fetchNow(this@MainActivity) { msg ->
+                runOnUiThread { text = camLabel(); Toast.makeText(this@MainActivity, "Cameras: $msg", Toast.LENGTH_LONG).show() }
+            }
+        }
+        link("Head unit diagnostics") { showDiagnostics() }
+        fun adbLabel() = if (AdbBridge.isOn()) "ADB bridge: ON until " + timeFmt.format(Date(AdbBridge.until)) + " (tap to turn off)"
+            else "ADB bridge to the car (30 min)"
+        link(adbLabel()) {
+            if (AdbBridge.isOn()) AdbBridge.turnOff(this@MainActivity) else {
+                AdbBridge.turnOn(this@MainActivity)
+                LinkService.start(this@MainActivity)
+                AlertDialog.Builder(this@MainActivity, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                    .setTitle("ADB bridge on")
+                    .setMessage("In Termux:\n\nadb connect 127.0.0.1:${AdbBridge.PORT}\nadb -s 127.0.0.1:${AdbBridge.PORT} shell\n\n" +
+                        "Works on home Wi-Fi and during Android Auto, as long as the live link is up. " +
+                        "The car's Wi-Fi ADB (port 5555) must be on. Turns itself off after ${AdbBridge.ON_MINUTES} min.")
+                    .setPositiveButton("OK", null).show()
+            }
+            text = adbLabel()
+        }
+
+        col.addView(small("App"))
+        var dlg: AlertDialog? = null
+        link("Cloud backup (GitHub repo and token)") { dlg?.dismiss(); cloudSettings() }
+        link("Car Companion $myVersion  \u00B7  Check for updates") { checkForUpdate(force = true) }
+
+        dlg = AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle("Settings")
+            .setView(android.widget.ScrollView(this).apply { addView(col) })
+            .setPositiveButton("Done") { _, _ -> render() }
+            .show()
+    }
+
+    /** Where the car's backups live. Save changes only what was typed; Forget asks first. */
+    private fun cloudSettings() {
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(px(22), px(8), px(22), 0) }
         fun field(v: String, hint: String, secret: Boolean) = EditText(this).apply {
             setText(v); this.hint = hint; isSingleLine = true
@@ -744,81 +814,29 @@ class MainActivity : Activity() {
         val tok = field("", if (token.isNotEmpty()) "Saved - leave empty to keep it" else "Paste the token", true); col.addView(tok)
         col.addView(small("Passphrase (only if backups are encrypted)"))
         val pass = field(passphrase, "Leave empty if none", true); col.addView(pass)
-        col.addView(TextView(this).apply {
-            text = "Car Companion $myVersion  \u00B7  Check for updates"
-            setTextColor(CYAN); textSize = 14f; setPadding(0, px(16), 0, px(8))
-            setOnClickListener { checkForUpdate(force = true) }
-        })
-        col.addView(TextView(this).apply {
-            text = "Head unit diagnostics"
-            setTextColor(CYAN); textSize = 14f; setPadding(0, px(4), 0, px(8))
-            setOnClickListener { showDiagnostics() }
-        })
-        col.addView(TextView(this).apply {
-            fun label(): String {
-                val set = CameraUpdater.set(this@MainActivity)
-                val err = CameraUpdater.lastError(this@MainActivity)
-                return "Traffic cameras: " + (set?.let { "${it.cams.size} · updated " + SimpleDateFormat("d MMM", Locale.US).format(Date(it.fetchedAt)) } ?: "not downloaded yet") +
-                    (if (err.isNotEmpty()) " (last try failed)" else "") + "  \u00B7  Update now"
-            }
-            text = label()
-            setTextColor(CYAN); textSize = 14f; setPadding(0, px(4), 0, px(8))
-            setOnClickListener {
-                text = "Traffic cameras: updating..."
-                CameraUpdater.fetchNow(this@MainActivity) { msg ->
-                    runOnUiThread { text = label(); Toast.makeText(this@MainActivity, "Cameras: $msg", Toast.LENGTH_LONG).show() }
-                }
-            }
-        })
-        col.addView(TextView(this).apply {
-            fun label() = if (AdbBridge.isOn()) "ADB bridge: ON until " + timeFmt.format(Date(AdbBridge.until)) + " (tap to turn off)"
-                else "ADB bridge to the car (30 min)"
-            text = label()
-            setTextColor(CYAN); textSize = 14f; setPadding(0, px(4), 0, px(8))
-            setOnClickListener {
-                if (AdbBridge.isOn()) AdbBridge.turnOff(this@MainActivity) else {
-                    AdbBridge.turnOn(this@MainActivity)
-                    LinkService.start(this@MainActivity)
-                    AlertDialog.Builder(this@MainActivity, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                        .setTitle("ADB bridge on")
-                        .setMessage("In Termux:\n\nadb connect 127.0.0.1:${AdbBridge.PORT}\nadb -s 127.0.0.1:${AdbBridge.PORT} shell\n\n" +
-                            "Works on home Wi-Fi and during Android Auto, as long as the live link is up. " +
-                            "The car's Wi-Fi ADB (port 5555) must be on. Turns itself off after ${AdbBridge.ON_MINUTES} min.")
-                        .setPositiveButton("OK", null).show()
-                }
-                text = label()
-            }
-        })
-        val mediaBox = android.widget.CheckBox(this).apply {
-            text = "Show the phone's song on the car"
-            isChecked = LinkStore.mediaOn(this@MainActivity)
-            setTextColor(TEXT)
-        }
-        val linkBox = android.widget.CheckBox(this).apply {
-            text = "Live link with the car (no internet needed)"
-            isChecked = LinkStore.enabled(this@MainActivity)
-            setTextColor(TEXT)
-        }
-        col.addView(linkBox)
-        col.addView(mediaBox)
-        col.addView(small(if (LinkStore.key(this) == null) "Waiting for the car to share its link key (needs the car online once)."
-            else "Ready. The car sends data straight to this phone on home Wi-Fi and during Android Auto."))
+        col.addView(small("Saving with nothing changed keeps everything as it is."))
         AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-            .setTitle("Connect to your car's backups")
+            .setTitle("Cloud backup")
             .setView(col)
             .setPositiveButton("Save") { _, _ ->
-                repoName = repo.text.toString()
+                repo.text.toString().trim().takeIf { it.isNotEmpty() }?.let { repoName = it }
                 tok.text.toString().trim().takeIf { it.isNotEmpty() }?.let { token = it }
                 passphrase = pass.text.toString()
-                LinkStore.setEnabled(this, linkBox.isChecked)
-                LinkStore.setMediaOn(this, mediaBox.isChecked)
-                if (linkBox.isChecked) LinkService.start(this) else LinkService.stop(this)
                 refresh()
             }
-            .setNeutralButton("Forget") { _, _ ->
-                LinkService.stop(this); prefs.edit().clear().apply(); data = null; render()
-            }
+            .setNeutralButton("Forget\u2026") { _, _ -> confirmForget() }
             .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    /** Wipes this phone's copy of everything - only after a clear yes. */
+    private fun confirmForget() {
+        AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle("Forget everything on this phone?")
+            .setMessage("This removes the token, the live-link key, the car data shown here and fill-ups not yet sent to the car. " +
+                "Nothing on the car or in your GitHub backups is deleted, but you'd have to paste the token again.")
+            .setPositiveButton("Forget") { _, _ -> LinkService.stop(this); prefs.edit().clear().apply(); data = null; render() }
+            .setNegativeButton("Keep", null)
             .show()
     }
 
