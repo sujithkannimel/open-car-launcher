@@ -168,6 +168,9 @@ class LinkService : Service() {
                 // A spare ADB tunnel from the car: kept open for Termux's adb (bridge on only).
                 if (CarLink.isTunnelRequest(text, now)) { keepOpen = AdbBridge.offerSpare(s); return }
 
+                // The car has no GPS fix yet: stream ours until it hangs up.
+                if (CarLink.isGpsRequest(text, now)) { GpsShare.serve(this, s, key); return }
+
                 // Second connection: the car wants the launcher APK we offered.
                 CarLink.parseApkRequest(text, now)?.let { ver ->
                     val offer = LinkStore.offer(this) ?: run { LinkStore.note(this, "car asked for $ver, but no file here"); return }
@@ -201,7 +204,7 @@ class LinkService : Service() {
                 msg.extra.cmd?.let { PhoneMedia.run(this, it) }
                 val np = if (LinkStore.mediaOn(this)) PhoneMedia.nowPlaying(this, msg.extra.npArtKey) else null
                 val cams = camerasFor(msg.extra.camVer, now)
-                val reply = CarLink.seal(key, CarLink.phoneMessage(LinkStore.localFills(this), now, offer, np, AdbBridge.isOn(now), cams))
+                val reply = CarLink.seal(key, CarLink.phoneMessage(LinkStore.localFills(this), now, offer, np, AdbBridge.isOn(now), cams, GpsShare.canShare(this)))
                 s.getOutputStream().apply { write((reply + "\n").toByteArray()); flush() }
                 LinkStore.saveLive(this, msg, s.inetAddress?.hostAddress.orEmpty())
                 main.post {
@@ -331,8 +334,13 @@ class LinkService : Service() {
             .setContentIntent(openApp())
             .setOngoing(true)
             .build()
-        if (Build.VERSION.SDK_INT >= 29) startForeground(NOTE_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
-        else startForeground(NOTE_ID, n)
+        // Location type only with "allow all the time": without it Android refuses the whole service.
+        val type = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or
+            (if (GpsShare.hasFine(this) && GpsShare.hasBackground(this)) ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else 0)
+        if (Build.VERSION.SDK_INT >= 29) {
+            try { startForeground(NOTE_ID, n, type) }
+            catch (_: Exception) { startForeground(NOTE_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE) }
+        } else startForeground(NOTE_ID, n)
     }
 
     private fun volts(v: Float) = String.format(Locale.US, "%.1f V", v)

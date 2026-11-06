@@ -160,18 +160,20 @@ object CarLink {
 
     /** [adb]: the phone's ADB bridge is on - the car keeps a tunnel to its own adbd open. */
     /** [cams]: a newer camera list (Cameras.encodeSet) when the car's version differs. */
+    /** [gps]: the phone can share its GPS while the car has no fix (setting on, permission granted). */
     data class PhoneMsg(val fills: List<InboxFill>, val offer: Offer?, val np: NowPlaying? = null, val adb: Boolean = false,
-                        val cams: String? = null)
+                        val cams: String? = null, val gps: Boolean = false)
 
     /** Phone -> car: fill-ups the car hasn't acknowledged yet, an update if the phone has one, what plays. */
     fun phoneMessage(fills: List<InboxFill>, now: Long, offer: Offer? = null, np: NowPlaying? = null, adb: Boolean = false,
-                     cams: String? = null): String = JSONObject()
+                     cams: String? = null, gps: Boolean = false): String = JSONObject()
         .put("k", "phone").put("t", now)
         .put("fills", JSONArray(fills.map { JSONObject(it.toJson()) }))
         .put("offer", offer?.let { JSONObject().put("ver", it.version).put("size", it.size).put("sha", it.sha256) } ?: JSONObject.NULL)
         .put("np", np?.let { npToJson(it) } ?: JSONObject.NULL)
         .put("adb", adb)
         .put("cams", cams ?: JSONObject.NULL)
+        .put("gps", gps)
         .toString()
 
     fun parsePhone(text: String, now: Long): PhoneMsg? = try {
@@ -183,6 +185,7 @@ object CarLink {
             o.optJSONObject("np")?.let { npFromJson(it) },
             o.optBoolean("adb", false),
             if (o.isNull("cams")) null else o.optString("cams").ifEmpty { null },
+            o.optBoolean("gps", false),
         )
     } catch (_: Exception) {
         null
@@ -214,6 +217,39 @@ object CarLink {
     }
 
     const val TUNNEL_GO = 0x47
+
+    /**
+     * Phone GPS for the car while its own receiver has no fix (a cold start can take minutes):
+     * the car opens a connection with this request and the phone writes one sealed [PhoneFix]
+     * line per fix (about one a second) until the car hangs up. Lines without a position keep
+     * the connection alive while the phone itself is still searching.
+     */
+    fun gpsRequest(now: Long): String = JSONObject().put("k", "gps").put("t", now).toString()
+
+    fun isGpsRequest(text: String, now: Long): Boolean = try {
+        val o = JSONObject(text)
+        o.optString("k") == "gps" && kotlin.math.abs(now - o.getLong("t")) <= MAX_AGE_MS
+    } catch (_: Exception) {
+        false
+    }
+
+    /** One phone fix: degrees, m/s, degrees (or -1), metres, wall-clock ms. */
+    data class PhoneFix(val lat: Double, val lon: Double, val speed: Float, val bearing: Float, val accuracy: Float, val time: Long)
+
+    fun phoneFix(f: PhoneFix?, now: Long): String = JSONObject().put("k", "fix").put("t", now).apply {
+        if (f != null) put("la", f.lat).put("lo", f.lon).put("sp", f.speed.toDouble()).put("br", f.bearing.toDouble())
+            .put("ac", f.accuracy.toDouble()).put("ft", f.time)
+    }.toString()
+
+    /** The fix in a phone line, or null for a keep-alive, a stale line or anything else. */
+    fun parsePhoneFix(text: String, now: Long): PhoneFix? = try {
+        val o = JSONObject(text)
+        if (o.optString("k") != "fix" || kotlin.math.abs(now - o.getLong("t")) > MAX_AGE_MS || !o.has("la")) null
+        else PhoneFix(o.getDouble("la"), o.getDouble("lo"), o.optDouble("sp", 0.0).toFloat(), o.optDouble("br", -1.0).toFloat(),
+            o.optDouble("ac", 99.0).toFloat(), o.optLong("ft", now))
+    } catch (_: Exception) {
+        null
+    }
 
     /** Lower-case hex SHA-256 of a file. */
     fun sha256(file: java.io.File): String {

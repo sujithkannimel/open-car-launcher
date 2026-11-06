@@ -44,6 +44,7 @@ import java.util.Locale
 class MainActivity : Activity() {
 
     companion object {
+        private const val REQ_GPS = 41
         // Graphite + neon, the same palette as the head unit.
         private val BG = Neon.BG
         private val CARD = Neon.SURFACE
@@ -755,6 +756,15 @@ class MainActivity : Activity() {
             setTextColor(TEXT)
             setOnCheckedChangeListener { _, on -> LinkStore.setMediaOn(this@MainActivity, on) }
         })
+        col.addView(android.widget.CheckBox(this).apply {
+            text = "Lend the phone's GPS to the car until it finds its own"
+            isChecked = GpsShare.enabled(this@MainActivity) && GpsShare.hasFine(this@MainActivity)
+            setTextColor(TEXT)
+            setOnCheckedChangeListener { _, on ->
+                GpsShare.setEnabled(this@MainActivity, on)
+                if (on) askGpsPermission()
+            }
+        })
         col.addView(small(if (LinkStore.key(this) == null) "Waiting for the car to share its link key (needs the car online once)."
             else "Ready. The car sends data straight to this phone on home Wi-Fi and during Android Auto."))
 
@@ -969,6 +979,41 @@ class MainActivity : Activity() {
 
     private fun label(t: String) = TextView(this).apply {
         text = t; setTextColor(DIM); setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+    }
+
+    /**
+     * Location in two steps, as Android requires: first "while using the app", then (on its own
+     * settings page) "Allow all the time" - the link runs with the phone locked.
+     */
+    private fun askGpsPermission() {
+        when {
+            !GpsShare.hasFine(this) -> requestPermissions(arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION,
+                android.Manifest.permission.ACCESS_COARSE_LOCATION), REQ_GPS)
+            !GpsShare.hasBackground(this) -> AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle("One more step")
+                .setMessage("On the next screen choose \"Allow all the time\" - the car asks for the phone's GPS " +
+                    "while the phone is locked. It is only switched on while the car has no fix of its own, " +
+                    "and the position only goes to the car, encrypted.")
+                .setPositiveButton("Continue") { _, _ ->
+                    requestPermissions(arrayOf(android.Manifest.permission.ACCESS_BACKGROUND_LOCATION), REQ_GPS)
+                }
+                .setNegativeButton("Cancel", null).show()
+            else -> {
+                LinkService.start(this)          // restart the service with location access
+                Toast.makeText(this, "Phone GPS will help the car after a cold start", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQ_GPS && GpsShare.enabled(this)) {
+            val askedBackground = permissions.contains(android.Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+            if (askedBackground && !GpsShare.hasBackground(this))
+                Toast.makeText(this, "Needs \"Allow all the time\" - tick the setting again to retry", Toast.LENGTH_LONG).show()
+            else if (GpsShare.hasFine(this)) askGpsPermission()
+            else Toast.makeText(this, "Location not allowed - the car will wait for its own GPS", Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun small(t: String) = TextView(this).apply {

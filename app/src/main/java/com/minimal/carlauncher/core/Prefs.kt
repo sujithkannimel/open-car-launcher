@@ -78,6 +78,8 @@ object Prefs {
     const val KEY_CAM_MINE = "pref_cam_mine"
     const val KEY_CAM_MUTED = "pref_cam_muted"
     const val KEY_CAM_CHIME = "pref_cam_chime"
+    const val KEY_CAM_ALERT = "pref_cam_alert"
+    const val KEY_CAM_RANGE = "pref_cam_range"
     const val KEY_WEATHER_JSON = "pref_weather_json"
     const val KEY_STAY_ON_CONNECT = "pref_stay_on_connect"
     const val KEY_USER_OPENED_ZLINK = "pref_user_opened_zlink_at"
@@ -476,10 +478,15 @@ object Prefs {
         get() = sp.getString(KEY_CAM_MUTED, "") ?: ""
         set(value) = sp.edit().putString(KEY_CAM_MUTED, value).apply()
 
-    /** Chime with a camera warning. */
-    var camChime: Boolean
-        get() = sp.getBoolean(KEY_CAM_CHIME, true)
-        set(value) = sp.edit().putBoolean(KEY_CAM_CHIME, value).apply()
+    /** How a camera warning sounds: "voice", "beep" or "off" (default voice; an old "chime off" means off). */
+    var camAlert: String
+        get() = sp.getString(KEY_CAM_ALERT, null) ?: if (sp.getBoolean(KEY_CAM_CHIME, true)) "voice" else "off"
+        set(value) = sp.edit().putString(KEY_CAM_ALERT, value).apply()
+
+    /** First-warning distance in metres: 500, 700 or 1000 (300 m more above 60 km/h). */
+    var camRangeM: Int
+        get() = sp.getInt(KEY_CAM_RANGE, 700)
+        set(value) = sp.edit().putInt(KEY_CAM_RANGE, value).apply()
 
     /** Timed acceleration runs (0-60, 0-100, 40-80), newest last. */
     var perfRuns: List<PerfRun>

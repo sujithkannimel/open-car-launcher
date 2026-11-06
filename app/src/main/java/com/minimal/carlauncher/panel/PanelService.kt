@@ -92,6 +92,8 @@ class PanelService : Service() {
     private var batteryBadgeView: View? = null
     private var battLabelView: TextView? = null
     private var tripView: TextView? = null
+    /** The strip's neon top line: flashes amber / red for a camera while another app is in front. */
+    private var stripLine: View? = null
     private var pulseAnim: android.animation.ObjectAnimator? = null
     private var shownBattState = -1
     private var pendingBattState = -1
@@ -128,7 +130,33 @@ class PanelService : Service() {
         TripTracker(this, { volts.engineMaybeRunning() }, { handler.post { liveLinkTick() } }) { cameras.onFix(it) }
     }
     private val cameras by lazy { CameraWatch(this) }
-    private val cameraChanged: () -> Unit = { updateBatteryDisplay() }
+    private var flashSeen = 0
+    private val cameraChanged: () -> Unit = {
+        updateBatteryDisplay()
+        val CS = com.minimal.carlauncher.core.CameraStore
+        // A new camera or the final warning: flash the strip's top line - but only over other
+        // apps (Android Auto); the home screen flashes its own cards.
+        if (CS.flashSeq != flashSeen) {
+            flashSeen = CS.flashSeq
+            if (CS.current != null && ZlinkGuard.topApp(this) != packageName) flashStrip(if (CS.over) Neon.RED else Neon.AMBER)
+        }
+    }
+
+    /** Phone GPS while the car's own has no fix: checked every 5 s. */
+    private var ownFixChecks = 0
+    private val phoneGpsCheck = object : Runnable {
+        override fun run() {
+            val pg = com.minimal.carlauncher.core.PhoneGps
+            if (pg.ownFresh()) {
+                if (pg.streaming && ++ownFixChecks >= 2) { pg.stop(); log("phone gps: car's own GPS has a fix") }
+            } else {
+                ownFixChecks = 0
+                if (!pg.streaming && pg.available && trips.isListening)
+                    pg.start({ l -> handler.post { trips.onPhoneFix(l) } }) { msg -> handler.post { log(msg) } }
+            }
+            handler.postDelayed(this, 5_000L)
+        }
+    }
     private val zlink by lazy { ZlinkGuard(this, handler, { ignitionElapsed }, { reversing }) }
     private val cloud by lazy { CloudSync(this, handler) { onPhoneFillsAdded() } }
 
@@ -196,6 +224,8 @@ class PanelService : Service() {
         com.minimal.carlauncher.core.PhoneMedia.addListener(playSync)
         com.minimal.carlauncher.core.CameraStore.removeListener(cameraChanged)
         com.minimal.carlauncher.core.CameraStore.addListener(cameraChanged)
+        handler.removeCallbacks(phoneGpsCheck)
+        handler.postDelayed(phoneGpsCheck, 5_000L)
         lastHeartbeatMs = 0L
         tripHeartbeat()
         trips.start()
@@ -254,6 +284,8 @@ class PanelService : Service() {
         battery.stop()
         trips.stop()
         com.minimal.carlauncher.core.CameraStore.removeListener(cameraChanged)
+        handler.removeCallbacks(phoneGpsCheck)
+        com.minimal.carlauncher.core.PhoneGps.stop()
         cameras.release()
         clear()
         log("service destroyed")
@@ -300,6 +332,7 @@ class PanelService : Service() {
                 Neon.GRADIENT.map { Neon.alpha(it, 150) }.toIntArray())
         }
         root.addView(topDivider, FrameLayout.LayoutParams(M, px(1.5f), Gravity.TOP))
+        stripLine = topDivider
 
         // 1+2. KNOBS: discs + concentric arcs, one shared geometry (see KnobsView / Prefs).
         val knobs = KnobsView(
@@ -1002,9 +1035,31 @@ class PanelService : Service() {
                     val kmh = (trips.lastFix?.speed ?: 0f) * 3.6f
                     val over = cam.cam.limit > 0 && kmh > cam.cam.limit + 3
                     text = "\uD83D\uDCF7 " + (if (cam.cam.limit > 0) "${cam.cam.limit} \u00B7 " else "") + "${cam.distanceM} m"
-                    setTextColor(if (over) Neon.RED else Neon.AMBER)
+                    setTextColor(if (over || com.minimal.carlauncher.core.CameraStore.over) Neon.RED else Neon.AMBER)
                 }
             }
+        }
+    }
+
+    /** Three pulses of a thick amber / red line along the top of the strip, then back to the neon hairline. */
+    private fun flashStrip(color: Int) {
+        val v = stripLine ?: return
+        val lp = v.layoutParams ?: return
+        val oldBg = v.background
+        val oldH = lp.height
+        v.animate().cancel()
+        lp.height = px(5f); v.layoutParams = lp
+        v.background = android.graphics.drawable.ColorDrawable(color)
+        android.animation.ObjectAnimator.ofFloat(v, View.ALPHA, 1f, 0.1f, 1f, 0.1f, 1f, 0.1f, 1f).apply {
+            duration = 2_100L
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(a: android.animation.Animator) {
+                    v.alpha = 1f
+                    v.background = oldBg
+                    v.layoutParams = v.layoutParams.also { it.height = oldH }
+                }
+            })
+            start()
         }
     }
 
@@ -1489,6 +1544,7 @@ class PanelService : Service() {
         batteryBadgeView = null
         battLabelView = null
         tripView = null
+        stripLine = null
         fuelBadgeView = null; fuelText = null; fuelIcon = null; fuelLabel = null
         weatherIcon = null; weatherTemp = null
         adjustReadout = null

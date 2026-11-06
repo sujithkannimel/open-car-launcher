@@ -126,6 +126,11 @@ class TripsActivity : AppCompatActivity() {
         super.onPause()
     }
 
+    override fun onDestroy() {
+        testVoice?.release(); testVoice = null
+        super.onDestroy()
+    }
+
     private fun select(t: String) {
         tab = t
         styleRail(tabFuel, t == TAB_FUEL)
@@ -614,33 +619,45 @@ class TripsActivity : AppCompatActivity() {
 
     // ================================================================== cameras
 
+    private var testVoice: com.minimal.carlauncher.panel.CameraVoice? = null
+
     private fun renderCams() {
         val cs = com.minimal.carlauncher.core.CameraStore
         val set = cs.osmSet(this)
-        val mine = cs.mine(); val muted = cs.muted()
+        val muted = cs.muted()
         content.addView(title("Traffic cameras"))
         val updated = set.fetchedAt.takeIf { it > 0 }?.let { SimpleDateFormat("d MMM yyyy", Locale.US).format(Date(it)) } ?: "-"
         content.addView(statRow(listOf(
             Stat("${set.cams.size}", "FROM OPENSTREETMAP · ${if (set.version.endsWith("seed")) "BUILT-IN" else "UPDATED $updated"}", CYAN),
-            Stat("${mine.size}", "MARKED BY YOU", PINK),
             Stat("${muted.size}", "MUTED", TEXT),
         )))
+        content.addView(section("Alert sound"))
+        fun mark(on: Boolean, t: String) = if (on) "\u25CF $t" else t
+        val mode = Prefs.camAlert
         content.addView(buttonRow(listOf(
-            (if (Prefs.camChime) "Chime: on" else "Chime: off") to { Prefs.camChime = !Prefs.camChime; render() },
+            mark(mode == "voice", "Voice") to { Prefs.camAlert = "voice"; render() },
+            mark(mode == "beep", "Beep") to { Prefs.camAlert = "beep"; render() },
+            mark(mode == "off", "Off") to { Prefs.camAlert = "off"; render() },
+            "Test" to {
+                val v = testVoice ?: com.minimal.carlauncher.panel.CameraVoice(this).also { testVoice = it }
+                v.alert("AI camera in ${com.minimal.carlauncher.panel.CameraVoice.distanceWords(Prefs.camRangeM.toDouble())}", 1,
+                    if (Prefs.camAlert == "off") "voice" else Prefs.camAlert)
+            },
         )))
-        content.addView(hint("A warning shows on the bottom strip and under the speed about 400 m before a camera ahead " +
-            "(600 m above 80 km/h), amber, or red when you're over its limit. Tap the speed twice during a warning to mute that camera. " +
-            "The map's camera button marks one where you are. The phone app refreshes the OpenStreetMap list for all of Kerala every week " +
-            "and sends it over the live link; your marks and mutes are kept and backed up."))
+        content.addView(section("First warning"))
+        val r = Prefs.camRangeM
+        content.addView(buttonRow(listOf(
+            mark(r == 500, "500 m") to { Prefs.camRangeM = 500; render() },
+            mark(r == 700, "700 m") to { Prefs.camRangeM = 700; render() },
+            mark(r == 1000, "1 km") to { Prefs.camRangeM = 1000; render() },
+        )))
+        content.addView(hint("Two warnings per camera: the first at the distance above (300 m more above 60 km/h), " +
+            "the last at 200 m - \"Slow down\" if you're over its limit. The voice plays over your music without pausing it. " +
+            "While a camera is ahead, the home screen shows it beside the map and flashes the Phone Link and Music cards; " +
+            "over Android Auto the bottom strip flashes and shows the distance. Amber, or red when over the limit. " +
+            "Tap the speed twice during a warning to mute that camera. The phone app refreshes the OpenStreetMap list " +
+            "for all of Kerala every week and sends it over the live link; mutes are kept and backed up."))
 
-        content.addView(section("Marked by you"))
-        if (mine.isEmpty()) content.addView(body("None yet."))
-        val fmt = SimpleDateFormat("d MMM, HH:mm", Locale.US)
-        mine.sortedByDescending { it.id }.forEach { c ->
-            val at = c.id.removePrefix("me:").toLongOrNull()?.let { fmt.format(Date(it)) } ?: c.id
-            content.addView(body(String.format(Locale.US, "%s   %.5f, %.5f", at, c.lat, c.lon)))
-            content.addView(buttonRow(listOf("Remove" to { cs.removeMine(c.id); render() })))
-        }
         content.addView(section("Muted"))
         if (muted.isEmpty()) content.addView(body("None."))
         muted.forEach { c ->

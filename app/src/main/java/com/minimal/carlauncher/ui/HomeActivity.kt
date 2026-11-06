@@ -130,18 +130,6 @@ class HomeActivity : AppCompatActivity() {
             }
         }
         binding.gaugeClock.setOnClickListener { openClock() }
-        // Mark a traffic camera where the car is now. Sits just below Recenter.
-        binding.btnMarkCamera.post { binding.btnMarkCamera.translationY = binding.btnMarkCamera.height * 1.25f }
-        binding.btnMarkCamera.setOnClickListener { view ->
-            val p = com.minimal.carlauncher.core.CameraStore.lastPos
-            if (p == null || System.currentTimeMillis() - p.third > 15_000L) {
-                Toast.makeText(this, "No GPS fix yet - try again in a moment", Toast.LENGTH_SHORT).show()
-            } else {
-                view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                com.minimal.carlauncher.core.CameraStore.mark(p.first, p.second)
-                Toast.makeText(this, "Camera marked here. Remove it in Trips \u2192 Cameras.", Toast.LENGTH_SHORT).show()
-            }
-        }
         // Long-press the speed: timed acceleration runs.
         binding.gaugeSpeed.setOnLongClickListener {
             startActivity(android.content.Intent(this, TripsActivity::class.java)
@@ -271,7 +259,63 @@ class HomeActivity : AppCompatActivity() {
         }
     }
 
-    private val cameraListener: () -> Unit = { render(viewModel.vehicle.value) }
+    private var flashSeen = 0
+    private val cameraListener: () -> Unit = {
+        render(viewModel.vehicle.value)
+        val cs = com.minimal.carlauncher.core.CameraStore
+        if (cs.flashSeq != flashSeen) {
+            flashSeen = cs.flashSeq
+            if (cs.current != null) flashCards(if (cs.over) com.minimal.carlauncher.core.Neon.RED else com.minimal.carlauncher.core.Neon.AMBER)
+        }
+    }
+
+    /**
+     * Camera chip in the circle's bottom-right corner: "AI CAMERA" / "SPEED 50" over the distance,
+     * amber, red when over the limit. Gone once the camera is passed.
+     */
+    private fun renderCameraChip() {
+        val cs = com.minimal.carlauncher.core.CameraStore
+        val cam = cs.current
+        val chip = binding.cameraChip
+        if (cam == null) { chip.visibility = View.GONE; return }
+        val color = if (cs.over) com.minimal.carlauncher.core.Neon.RED else com.minimal.carlauncher.core.Neon.AMBER
+        binding.cameraChipTitle.text = "\uD83D\uDCF7 " + when {
+            cam.cam.limit > 0 -> "SPEED ${cam.cam.limit}"
+            cam.cam.kind == "speed" -> "SPEED CAM"
+            else -> "AI CAMERA"
+        } + (if (cs.another) " +1" else "")
+        binding.cameraChipDistance.text = if (cam.distanceM >= 1000)
+            String.format(java.util.Locale.US, "%.1f km", cam.distanceM / 1000.0) else "${(cam.distanceM / 10) * 10} m"
+        binding.cameraChipTitle.setTextColor(color)
+        binding.cameraChipDistance.setTextColor(color)
+        chip.background = android.graphics.drawable.GradientDrawable().apply {
+            cornerRadius = 18f * resources.displayMetrics.density
+            setColor(0xE6101018.toInt())
+            setStroke((2f * resources.displayMetrics.density).toInt(), color)
+        }
+        chip.visibility = View.VISIBLE
+    }
+
+    /** Three pulses of an amber / red border on the Phone Link and Music cards. */
+    private fun flashCards(color: Int) {
+        val d = resources.displayMetrics.density
+        for (card in listOf<View>(binding.cardProjection, binding.cardMusic)) {
+            val ring = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = resources.getDimension(R.dimen.corner)
+                setStroke((4f * d).toInt(), color)
+                setColor(com.minimal.carlauncher.core.Neon.alpha(color, 40))
+            }
+            card.foreground = ring
+            android.animation.ValueAnimator.ofInt(255, 0, 255, 0, 255, 0).apply {
+                duration = 2_100L
+                addUpdateListener { ring.alpha = it.animatedValue as Int }
+                addListener(object : android.animation.AnimatorListenerAdapter() {
+                    override fun onAnimationEnd(a: android.animation.Animator) { card.foreground = null }
+                })
+                start()
+            }
+        }
+    }
 
     private var perfShownUntil = 0L
     private var statusColor = 0
@@ -328,14 +372,8 @@ class HomeActivity : AppCompatActivity() {
             if (!state.hasFix || state.speedMps < com.minimal.carlauncher.core.Constants.SPEED_NOISE_GATE_MPS) 0f
             else state.speedMps * 3.6f)
         binding.textSpeedUnit.text = Format.unitLabel(unit)
-        val cam = com.minimal.carlauncher.core.CameraStore.current
-        if (cam != null) {
-            val kmh = if (state.hasFix) state.speedMps * 3.6f else 0f
-            val over = cam.cam.limit > 0 && kmh > cam.cam.limit + 3
-            binding.textSpeedStatus.text = (if (cam.cam.kind == "speed") "SPEED CAMERA" else if (cam.cam.kind == "user") "CAMERA" else "AI CAMERA") +
-                (if (cam.cam.limit > 0) " ${cam.cam.limit}" else "") + " \u00B7 ${cam.distanceM} M"
-            binding.textSpeedStatus.setTextColor(if (over) com.minimal.carlauncher.core.Neon.RED else com.minimal.carlauncher.core.Neon.AMBER)
-        } else if (android.os.SystemClock.elapsedRealtime() >= perfShownUntil) {
+        renderCameraChip()
+        if (android.os.SystemClock.elapsedRealtime() >= perfShownUntil) {
             binding.textSpeedStatus.setText(
                 when {
                     !state.permissionGranted -> R.string.gps_permission_needed
@@ -344,6 +382,7 @@ class HomeActivity : AppCompatActivity() {
                     else -> R.string.gps_lock
                 }
             )
+            if (state.fromPhone) binding.textSpeedStatus.text = getString(R.string.gps_phone)
             // While searching, show how many satellites it sees: 0 under a roof, climbing in the open.
             if (state.permissionGranted && state.gpsEnabled && !state.hasFix) {
                 com.minimal.carlauncher.core.GnssInfo.label().takeIf { it.isNotEmpty() }?.let {
@@ -452,6 +491,7 @@ class HomeActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         com.minimal.carlauncher.core.PerfLive.listener = { run, best -> showPerf(run, best) }
+        flashSeen = com.minimal.carlauncher.core.CameraStore.flashSeq
         com.minimal.carlauncher.core.CameraStore.addListener(cameraListener)
         viewModel.start()
         map.onResume()

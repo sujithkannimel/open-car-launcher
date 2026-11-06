@@ -94,6 +94,18 @@ class CarLinkTest {
         assertEquals(false, CarLink.isTunnelRequest(CarLink.apkRequest("0.4", now), now))
     }
 
+    @Test fun phoneGpsStream() {
+        val now = 1_800_000_000_000L
+        assertEquals(true, CarLink.parsePhone(CarLink.phoneMessage(emptyList(), now, gps = true), now)!!.gps)
+        assertEquals(true, CarLink.isGpsRequest(CarLink.gpsRequest(now), now))
+        assertEquals(false, CarLink.isGpsRequest(CarLink.tunnelRequest(now), now))
+        assertEquals(false, CarLink.isTunnelRequest(CarLink.gpsRequest(now), now))
+        val f = CarLink.PhoneFix(8.89, 76.61, 13.5f, 270f, 6f, now - 400)
+        assertEquals(f, CarLink.parsePhoneFix(CarLink.phoneFix(f, now), now))
+        assertNull(CarLink.parsePhoneFix(CarLink.phoneFix(null, now), now))                  // keep-alive
+        assertNull(CarLink.parsePhoneFix(CarLink.phoneFix(f, now), now + CarLink.MAX_AGE_MS + 1))
+    }
+
     @Test fun linkFileRoundTrip() {
         val k = CarLink.newKey()
         assertEquals(k, CarLink.parseLinkFile(CarLink.linkFile(k)))

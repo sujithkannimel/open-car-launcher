@@ -1,7 +1,6 @@
 package com.minimal.carlauncher.panel
 
 import android.content.Context
-import android.content.Intent
 import android.os.Handler
 import android.os.SystemClock
 import com.minimal.carlauncher.core.BackupStore
@@ -12,7 +11,7 @@ import java.util.Locale
 /**
  * Battery health from each voltage reading:
  * - the start window: from ignition until the engine first charges (at most 3 min), readings
- *   are collected - polled twice a second for the first minute - and split into the resting
+ *   are collected (the MCU's own broadcasts, every 15-30 s) and split into the resting
  *   voltage and the cranking dip;
  * - while driving, the charging voltage is logged and a "not charging" / "overcharging"
  *   alert raised after a few readings agree.
@@ -34,18 +33,20 @@ internal class BatteryMonitor(
     private var windowOpen = false
     private var seenCharging = false
     private val startSamples = ArrayList<Float>()
-    private var pollUntil = 0L
     private var lowCount = 0
     private var highCount = 0
 
-    /** New ignition: open the start window and ask the MCU for the voltage twice a second for a minute. */
+    /**
+     * New ignition: open the start window. The MCU only answers voltage queries every 15-30 s,
+     * so fast polling never caught the cranking dip - it just used battery-side CPU; readings
+     * now come from its own broadcasts, and the window is closed after 3 minutes at most.
+     */
     fun onIgnition() {
         windowOpen = true
         seenCharging = false
         startSamples.clear()
-        pollUntil = SystemClock.elapsedRealtime() + 60_000L
         handler.removeCallbacks(poll)
-        handler.post(poll)
+        handler.postDelayed(poll, 30_000L)
     }
 
     fun stop() = handler.removeCallbacks(poll)
@@ -54,10 +55,7 @@ internal class BatteryMonitor(
         override fun run() {
             if (!windowOpen) return
             if (SystemClock.elapsedRealtime() - ignitionAt() >= 180_000L) { closeWindow(); return }
-            if (SystemClock.elapsedRealtime() < pollUntil) {
-                try { context.sendBroadcast(Intent(PanelService.NWD_VOLT_QUERY_ACTION)) } catch (_: Exception) {}
-                handler.postDelayed(this, 500L)
-            } else handler.postDelayed(this, 30_000L)
+            handler.postDelayed(this, 30_000L)
         }
     }
 

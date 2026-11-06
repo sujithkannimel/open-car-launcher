@@ -17,6 +17,7 @@
     <string name="no_compass">No compass on this device</string>
     <string name="speed">Speed. Tap to switch units</string>
     <string name="gps_lock">● GPS lock</string>
+    <string name="gps_phone">● GPS (phone)</string>
     <string name="clock_open">Clock. Tap for alarms</string>
 
     <!-- Map portal -->
@@ -186,5 +187,4 @@
     <string name="settings_panel_hint">Draws quick controls in the 170 px black area below the app window</string>
     <string name="settings_stay_on_connect">Stay on current screen when phone connects</string>
     <string name="settings_stay_on_connect_hint">ZLink still connects in the background; open it from its floating button or the Phone Link tile.</string>
-    <string name="camera_mark">Mark a traffic camera here</string>
 </resources>

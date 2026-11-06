@@ -68,12 +68,15 @@ internal class TripTracker(
     }
 
     private val listener = object : LocationListener {
-        override fun onLocationChanged(l: Location) = onFix(l)
+        override fun onLocationChanged(l: Location) = onFix(l, fromPhone = false)
         @Deprecated("framework")
         override fun onStatusChanged(p: String?, s: Int, e: android.os.Bundle?) = Unit
         override fun onProviderEnabled(p: String) = Unit
         override fun onProviderDisabled(p: String) = Unit
     }
+
+    /** The car's own GPS is switched on (location permission granted). */
+    val isListening: Boolean get() = locMgr != null
 
     /** GPS odometer reading including distance not yet saved. */
     val odometerKm: Double get() = Prefs.gpsOdoKm + pendingKm
@@ -112,9 +115,17 @@ internal class TripTracker(
         flush(force = true)
     }
 
+    /** A fix from the phone's GPS (main thread): used only while the car has none of its own. */
+    fun onPhoneFix(l: Location) {
+        if (com.minimal.carlauncher.core.PhoneGps.ownFresh()) return
+        onFix(l, fromPhone = true)
+    }
+
     /** Adds distance between good fixes; drops noisy, stale, parked and impossible jumps. */
-    private fun onFix(l: Location) {
-        if (!firstFixLogged && startedAt > 0L) {
+    private fun onFix(l: Location, fromPhone: Boolean) {
+        if (!fromPhone && l.hasAccuracy() && l.accuracy <= 30f)
+            com.minimal.carlauncher.core.PhoneGps.ownFixAt = SystemClock.elapsedRealtime()
+        if (!fromPhone && !firstFixLogged && startedAt > 0L) {
             firstFixLogged = true
             log(String.format(Locale.US, "gps: lock %d s after start, \u00B1%.0f m, %s",
                 (SystemClock.elapsedRealtime() - startedAt) / 1000, l.accuracy, com.minimal.carlauncher.core.GnssInfo.label()))
@@ -137,7 +148,7 @@ internal class TripTracker(
         val ref = hardRef
         if (ref == null || l.time - ref.time > 3_500L) hardRef = l
         else if (l.time - ref.time >= 1_800L) { countHardEvents(ref, l, (l.time - ref.time) / 1000.0); hardRef = l }
-        if (l.hasSpeed() && l.accuracy <= 20f) perf.feed(l.time, l.speed * 3.6f).forEach { onPerfRun(it) }
+        if (!fromPhone && l.hasSpeed() && l.accuracy <= 20f) perf.feed(l.time, l.speed * 3.6f).forEach { onPerfRun(it) }
         // Just stopped: push to the phone now, so its "parked here" spot is where the car stands.
         if (mps >= 2.0) wasMoving = true
         else if (wasMoving && mps < 0.5) { wasMoving = false; onStopped() }

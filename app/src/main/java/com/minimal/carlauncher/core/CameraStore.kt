@@ -7,7 +7,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * The car's camera lists: OpenStreetMap cameras (built-in copy until the phone sends a newer
- * one), cameras the driver marked, and cameras the driver muted. Updates from the phone only
+ * one), cameras marked by hand in older versions, and cameras the driver muted. Updates from the phone only
  * replace the OpenStreetMap list; the driver's own lists are never touched by them.
  *
  * Also holds the warning currently shown ([current]) for the home screen and the panel.
@@ -17,9 +17,6 @@ object CameraStore {
     @Volatile private var osm: CameraSet? = null
     @Volatile private var mineCache: List<Camera>? = null
     @Volatile private var mutedCache: List<Camera>? = null
-
-    /** Last good GPS position (lat, lon, wall-clock ms) from the panel service, for "Mark camera here". */
-    @Volatile var lastPos: Triple<Double, Double, Long>? = null
 
     /** The warning shown now, or null. */
     @Volatile var current: CameraAhead? = null
@@ -59,20 +56,6 @@ object CameraStore {
         return true
     }
 
-    fun mark(lat: Double, lon: Double, now: Long = System.currentTimeMillis()): Camera {
-        val c = Camera("me:$now", lat, lon, "user")
-        val list = mine() + c
-        Prefs.camMine = Cameras.encode(list); mineCache = list
-        changed()
-        return c
-    }
-
-    fun removeMine(id: String) {
-        val list = mine().filter { it.id != id }
-        Prefs.camMine = Cameras.encode(list); mineCache = list
-        changed()
-    }
-
     fun mute(c: Camera) {
         if (muted().any { it.id == c.id }) return
         val list = muted() + c
@@ -87,10 +70,27 @@ object CameraStore {
         changed()
     }
 
-    /** The panel service's latest verdict. Listeners hear about it only when it changes. */
-    fun setCurrent(a: CameraAhead?) {
+    /** Driving faster than the camera's known limit. */
+    @Volatile var over = false
+        private set
+
+    /** Another camera follows close behind this one. */
+    @Volatile var another = false
+        private set
+
+    /** Goes up at each alert (new camera, final warning): screens flash the cards / strip once per step. */
+    @Volatile var flashSeq = 0
+        private set
+
+    /** The panel service's latest verdict. Listeners hear about it only when something visible changes. */
+    fun setCurrent(a: CameraAhead?, over: Boolean = false, another: Boolean = false, flash: Boolean = false) {
         val old = current
+        val oldOver = this.over
         current = a
-        if (old?.cam?.id != a?.cam?.id || (old != null && a != null && old.distanceM / 50 != a.distanceM / 50)) changed()
+        this.over = a != null && over
+        this.another = a != null && another
+        if (flash) flashSeq++
+        if (flash || oldOver != this.over || old?.cam?.id != a?.cam?.id ||
+            (old != null && a != null && old.distanceM / 50 != a.distanceM / 50)) changed()
     }
 }

@@ -98,26 +98,41 @@ object Cameras {
     // ------------------------------------------------------------------ ahead detection
 
     /**
-     * The nearest camera ahead: within [rangeM] (400 m, 600 m above 80 km/h), within 35
-     * degrees of the direction of travel, and only while moving faster than 15 km/h (GPS
-     * heading is unreliable when crawling). Muted cameras are skipped - matched by place, so a
-     * mute survives the camera being re-mapped with a new id.
+     * Cameras ahead, nearest first: within [rangeM], roughly in the direction of travel, and only
+     * while moving faster than 15 km/h (GPS heading is unreliable when crawling). The allowed
+     * angle is 60 degrees beyond 150 m - a camera past a bend is well off the current heading
+     * from far away - and 40 degrees nearer. Once a camera is picked up, the caller follows it
+     * by distance alone ([CameraTrack]), so the angle only matters for the first sighting.
+     * Muted cameras are skipped - matched by place, so a mute survives the camera being
+     * re-mapped with a new id.
      */
-    fun ahead(cams: List<Camera>, lat: Double, lon: Double, headingDeg: Float, kmh: Float, muted: List<Camera> = emptyList()): CameraAhead? {
-        if (kmh < 15f) return null
-        val range = if (kmh > 80f) 600.0 else 400.0
-        var best: CameraAhead? = null
+    fun aheadAll(cams: List<Camera>, lat: Double, lon: Double, headingDeg: Float, kmh: Float,
+                 muted: List<Camera> = emptyList(), rangeM: Double = 700.0): List<CameraAhead> {
+        if (kmh < 15f) return emptyList()
+        val box = rangeM / 100_000.0 + 0.002            // degrees: a cheap square first
+        val out = ArrayList<CameraAhead>()
         for (c in cams) {
-            if (abs(c.lat - lat) > 0.01 || abs(c.lon - lon) > 0.01) continue   // ~1 km box first: cheap
+            if (abs(c.lat - lat) > box || abs(c.lon - lon) > box * 1.1) continue
             val d = distanceM(lat, lon, c.lat, c.lon)
-            if (d > range || d < 8.0) continue
+            if (d > rangeM || d < 8.0) continue
             if (muted.any { it.id == c.id || distanceM(it.lat, it.lon, c.lat, c.lon) < 40.0 }) continue
             val off = abs(angleDiff(bearing(lat, lon, c.lat, c.lon), headingDeg.toDouble()))
-            if (off > 35.0) continue
-            if (best == null || d < best.distanceM) best = CameraAhead(c, d.roundToInt())
+            if (off > (if (d > 150.0) 60.0 else 40.0)) continue
+            out += CameraAhead(c, d.roundToInt())
         }
-        return best
+        return out.sortedBy { it.distanceM }
     }
+
+    /** The nearest camera ahead (see [aheadAll]). */
+    fun ahead(cams: List<Camera>, lat: Double, lon: Double, headingDeg: Float, kmh: Float,
+              muted: List<Camera> = emptyList(), rangeM: Double = 700.0): CameraAhead? =
+        aheadAll(cams, lat, lon, headingDeg, kmh, muted, rangeM).firstOrNull()
+
+    /** First-alert distance: the chosen one, 300 m more above 60 km/h (700 m becomes 1 km). */
+    fun alertRange(settingM: Int, kmh: Float): Double = settingM + (if (kmh > 60f) 300.0 else 0.0)
+
+    /** Distance of the final warning. */
+    const val FINAL_M = 200
 
     fun distanceM(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
         val r = 6_371_000.0
@@ -158,4 +173,33 @@ object Cameras {
         val o = JSONObject(json ?: return null)
         CameraSet(o.getString("ver"), o.optLong("at"), decode(o.getJSONArray("cams").toString()))
     } catch (_: Exception) { null }
+}
+
+/**
+ * Follows one camera after it was picked up, by distance only, so a bend or a GPS heading
+ * wobble doesn't drop it. [update] says what happened on each fix.
+ */
+class CameraTrack(val cam: Camera, startM: Double) {
+    enum class Step { APPROACHING, PASSED, LEFT }
+    var distanceM: Double = startM; private set
+    private var minM = startM
+    private var growing = 0
+
+    /**
+     * PASSED once it got within 60 m and the distance grows again (or within 15 m);
+     * LEFT when the distance keeps growing while still far off (the camera is on another road)
+     * or the car is clearly moving away from it.
+     */
+    fun update(lat: Double, lon: Double): Step {
+        val d = Cameras.distanceM(lat, lon, cam.lat, cam.lon)
+        distanceM = d
+        if (d < 15.0) return Step.PASSED
+        if (d < minM) { minM = d; growing = 0; return Step.APPROACHING }
+        if (d > minM + 5.0) growing++
+        return when {
+            minM < 60.0 && d > minM + 15.0 -> Step.PASSED
+            growing >= 4 || d > minM + 150.0 -> Step.LEFT
+            else -> Step.APPROACHING
+        }
+    }
 }

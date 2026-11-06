@@ -35,9 +35,24 @@ class CamerasTest {
         assertNotNull(north); assertTrue(north!!.distanceM in 320..340)
         assertNull(Cameras.ahead(list, 8.5000, 76.9000, 180f, 50f))      // driving away
         assertNull(Cameras.ahead(list, 8.5000, 76.9000, 0f, 8f))         // crawling: heading unreliable
-        assertNull(Cameras.ahead(list, 8.4950, 76.9000, 0f, 50f))        // 890 m: too far at 50 km/h
-        assertNotNull(Cameras.ahead(listOf(Camera("osm:9", 8.5050, 76.9000, "ai")), 8.5000, 76.9000, 0f, 90f)) // 556 m at 90
+        assertNull(Cameras.ahead(list, 8.4950, 76.9000, 0f, 50f))        // 890 m: too far for 700 m
+        assertNotNull(Cameras.ahead(list, 8.4950, 76.9000, 0f, 70f, rangeM = Cameras.alertRange(700, 70f))) // 1 km above 60
+        assertNotNull(Cameras.ahead(list, 8.5000, 76.9000, 50f, 50f))    // 330 m, 50 deg off: past a bend
+        assertNull(Cameras.ahead(list, 8.5000, 76.8990, 90f, 50f))       // 72 deg off: beside the road, not ahead
         assertNull(Cameras.ahead(list, 8.5000, 76.9000, 0f, 50f, muted = listOf(Camera("osm:other", 8.50301, 76.90001, "ai"))))
+    }
+
+    @Test fun trackFollowsUntilPassedOrLeft() {
+        val cam = Camera("osm:9", 8.5030, 76.9000, "ai")
+        val t = CameraTrack(cam, 330.0)
+        for (lat in listOf(8.5005, 8.5015, 8.5025, 8.5028)) assertEquals(CameraTrack.Step.APPROACHING, t.update(lat, 76.9))
+        assertEquals(CameraTrack.Step.APPROACHING, t.update(8.5033, 76.9))   // 33 m: GPS noise, not yet passed
+        assertEquals(CameraTrack.Step.PASSED, t.update(8.5036, 76.9))        // 66 m past the closest point
+        val other = CameraTrack(cam, 330.0)                                  // camera on a parallel road
+        assertEquals(CameraTrack.Step.APPROACHING, other.update(8.5010, 76.9))
+        var step = CameraTrack.Step.APPROACHING
+        for (lon in listOf(76.9010, 76.9020, 76.9030, 76.9040, 76.9050)) step = other.update(8.5010, lon)
+        assertEquals(CameraTrack.Step.LEFT, step)
     }
 
     @Test fun sanityVersionDiffAndCodec() {

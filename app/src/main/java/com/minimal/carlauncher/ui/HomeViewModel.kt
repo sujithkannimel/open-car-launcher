@@ -140,9 +140,12 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun publish() {
-        val location = lastLocation
         val ageMs = SystemClock.elapsedRealtime() - lastFixElapsedMs
-        val hasFix = location != null && ageMs in 0..Constants.FIX_STALE_MS
+        val ownFix = lastLocation != null && ageMs in 0..Constants.FIX_STALE_MS
+        // No fix of our own yet (cold start): the phone's GPS over the live link, if it shares.
+        val phone = if (ownFix) null else com.minimal.carlauncher.core.PhoneGps.fresh()
+        val location = phone ?: lastLocation
+        val hasFix = ownFix || phone != null
 
         val speedMps = if (hasFix && location != null) speedProvider.speedOf(location) else 0f
 
@@ -186,7 +189,8 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             permissionGranted = speedProvider.hasPermission,
             preciseLocation = speedProvider.hasPermission,
             latitude = location?.latitude,
-            longitude = location?.longitude
+            longitude = location?.longitude,
+            fromPhone = phone != null
         )
     }
 

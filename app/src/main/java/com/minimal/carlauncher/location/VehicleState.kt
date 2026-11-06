@@ -13,7 +13,9 @@ data class VehicleState(
     val preciseLocation: Boolean = false,
     /** Last known position; kept after the fix goes stale so the map keeps a car marker. */
     val latitude: Double? = null,
-    val longitude: Double? = null
+    val longitude: Double? = null,
+    /** The position and speed are borrowed from the phone's GPS (the car's has no fix yet). */
+    val fromPhone: Boolean = false
 ) {
     val hasPosition: Boolean get() = latitude != null && longitude != null
 }
