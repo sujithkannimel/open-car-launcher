@@ -136,9 +136,11 @@ class PanelService : Service() {
         val CS = com.minimal.carlauncher.core.CameraStore
         // A new camera or the final warning: flash the strip's top line - but only over other
         // apps (Android Auto); the home screen flashes its own cards.
+        val otherApp = CS.current != null && ZlinkGuard.topApp(this) != packageName
+        stripGlow(if (otherApp) (if (CS.over) Neon.RED else Neon.AMBER) else null)
         if (CS.flashSeq != flashSeen) {
             flashSeen = CS.flashSeq
-            if (CS.current != null && ZlinkGuard.topApp(this) != packageName) flashStrip(if (CS.over) Neon.RED else Neon.AMBER)
+            if (otherApp) flashStrip()
         }
     }
 
@@ -1041,24 +1043,39 @@ class PanelService : Service() {
         }
     }
 
-    /** Three pulses of a thick amber / red line along the top of the strip, then back to the neon hairline. */
-    private fun flashStrip(color: Int) {
+    /**
+     * While a camera is ahead and another app (Android Auto) is in front, the strip's top line
+     * becomes a thick steady amber / red bar until the camera is passed; null puts the neon
+     * hairline back.
+     */
+    private var stripGlowColor: Int? = null
+    private var stripNormalBg: android.graphics.drawable.Drawable? = null
+    private var stripNormalH = 0
+    private var stripPulse: android.animation.ObjectAnimator? = null
+
+    private fun stripGlow(color: Int?) {
         val v = stripLine ?: return
+        if (color == stripGlowColor) return
         val lp = v.layoutParams ?: return
-        val oldBg = v.background
-        val oldH = lp.height
-        v.animate().cancel()
-        lp.height = px(5f); v.layoutParams = lp
-        v.background = android.graphics.drawable.ColorDrawable(color)
-        android.animation.ObjectAnimator.ofFloat(v, View.ALPHA, 1f, 0.1f, 1f, 0.1f, 1f, 0.1f, 1f).apply {
-            duration = 2_100L
-            addListener(object : android.animation.AnimatorListenerAdapter() {
-                override fun onAnimationEnd(a: android.animation.Animator) {
-                    v.alpha = 1f
-                    v.background = oldBg
-                    v.layoutParams = v.layoutParams.also { it.height = oldH }
-                }
-            })
+        if (stripGlowColor == null) { stripNormalBg = v.background; stripNormalH = lp.height }
+        stripGlowColor = color
+        if (color == null) {
+            stripPulse?.cancel(); stripPulse = null
+            v.alpha = 1f
+            v.background = stripNormalBg
+            lp.height = stripNormalH; v.layoutParams = lp
+        } else {
+            v.background = android.graphics.drawable.ColorDrawable(color)
+            lp.height = px(5f); v.layoutParams = lp
+        }
+    }
+
+    /** Three strong pulses of the bar at an alert. */
+    private fun flashStrip() {
+        val v = stripLine ?: return
+        stripPulse?.cancel()
+        stripPulse = android.animation.ObjectAnimator.ofFloat(v, View.ALPHA, 1f, 0.1f, 1f, 0.1f, 1f, 0.1f, 1f).apply {
+            duration = 2_400L
             start()
         }
     }
@@ -1545,6 +1562,7 @@ class PanelService : Service() {
         battLabelView = null
         tripView = null
         stripLine = null
+        stripGlowColor = null
         fuelBadgeView = null; fuelText = null; fuelIcon = null; fuelLabel = null
         weatherIcon = null; weatherTemp = null
         adjustReadout = null

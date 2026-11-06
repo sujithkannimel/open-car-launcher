@@ -50,7 +50,7 @@ internal class CameraWatch(private val context: Context) {
         if (a.distanceM <= Cameras.FINAL_M) {
             // Picked up late (just turned onto the road): one alert says it all.
             finalDone = true; overSaid = over
-            voice.alert(if (over) slowDown(a) else name(a) + " ahead" + then(), if (over) 2 else 1)
+            voice.alert(if (over) slowDown(a) else name(a) + " ahead" + then(), if (over) 3 else 2)
         } else {
             finalDone = false; overSaid = false
             voice.alert(name(a) + (if (a.cam.limit > 0) ", limit ${a.cam.limit}," else "") +
@@ -71,10 +71,10 @@ internal class CameraWatch(private val context: Context) {
         var flash = false
         if (!finalDone && a.distanceM <= Cameras.FINAL_M) {
             finalDone = true; overSaid = over; flash = true
-            voice.alert(if (over) slowDown(a) else "Camera ahead", 2)
+            voice.alert(if (over) slowDown(a) else "Camera ahead", if (over) 3 else 2)
         } else if (finalDone && over && !overSaid) {
             overSaid = true; flash = true
-            voice.alert(slowDown(a), 2)
+            voice.alert(slowDown(a), 3)
         }
         CameraStore.setCurrent(a, over, another, flash)
     }

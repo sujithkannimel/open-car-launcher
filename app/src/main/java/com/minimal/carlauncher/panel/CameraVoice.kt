@@ -21,6 +21,7 @@ class CameraVoice(context: Context) {
     @Volatile private var ready = false
     @Volatile private var failed = false
     private var pending: String? = null
+    private var pendingBeeps = 1
 
     private val tts: TextToSpeech? = try {
         TextToSpeech(app) { status ->
@@ -32,10 +33,10 @@ class CameraVoice(context: Context) {
                     .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
                 ready = true
-                pending?.let { pending = null; speakNow(it) }
+                pending?.let { pending = null; speakNow(it, pendingBeeps) }
             } else {
                 failed = true
-                pending?.let { pending = null; beep(1) }
+                pending?.let { pending = null; beep(pendingBeeps) }
             }
         }
     } catch (_: Exception) { failed = true; null }
@@ -45,27 +46,42 @@ class CameraVoice(context: Context) {
         try { ToneGenerator(AudioManager.STREAM_MUSIC, 100) } catch (_: Exception) { null }
     }
 
-    /** Says [text] (or beeps [beeps] times) as the Cameras setting allows. */
+    /**
+     * Says [text] as the Cameras setting allows, or plays a beep pattern: [beeps] 1 = first
+     * alert (three beeps), 2 = final alert (two long), 3 = over the limit (rapid, twice).
+     */
     fun alert(text: String, beeps: Int, mode: String = Prefs.camAlert) {
         when (mode) {
             "off" -> return
             "beep" -> beep(beeps)
             else -> when {
-                ready -> speakNow(text)
+                ready -> speakNow(text, beeps)
                 failed || tts == null -> beep(beeps)
-                else -> pending = text          // engine still starting: say it as soon as it's up
+                else -> { pending = text; pendingBeeps = beeps }   // engine still starting: say it as soon as it's up
             }
         }
     }
 
-    private fun speakNow(text: String) {
+    private fun speakNow(text: String, beeps: Int = 1) {
         val p = Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1f) }
         val r = try { tts?.speak(text, TextToSpeech.QUEUE_FLUSH, p, "cam") } catch (_: Exception) { TextToSpeech.ERROR }
-        if (r != TextToSpeech.SUCCESS) beep(1)
+        if (r != TextToSpeech.SUCCESS) beep(beeps)
     }
 
-    private fun beep(times: Int) {
-        try { tone?.startTone(if (times > 1) ToneGenerator.TONE_PROP_BEEP2 else ToneGenerator.TONE_PROP_BEEP, 250) } catch (_: Exception) {}
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+
+    /** A pattern loud and long enough to hear over music: (on ms, off ms) steps. */
+    private fun beep(kind: Int) {
+        val steps = when (kind) {
+            1 -> listOf(180 to 140, 180 to 140, 180 to 0)
+            2 -> listOf(450 to 200, 450 to 0)
+            else -> listOf(110 to 70, 110 to 70, 110 to 300, 110 to 70, 110 to 70, 110 to 0)
+        }
+        var at = 0L
+        for ((on, off) in steps) {
+            main.postDelayed({ try { tone?.startTone(ToneGenerator.TONE_DTMF_D, on) } catch (_: Exception) {} }, at)
+            at += on + off
+        }
     }
 
     fun release() {

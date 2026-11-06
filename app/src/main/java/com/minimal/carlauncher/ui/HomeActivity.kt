@@ -277,8 +277,9 @@ class HomeActivity : AppCompatActivity() {
         val cs = com.minimal.carlauncher.core.CameraStore
         val cam = cs.current
         val chip = binding.cameraChip
-        if (cam == null) { chip.visibility = View.GONE; return }
+        if (cam == null) { chip.visibility = View.GONE; cardGlow(null); return }
         val color = if (cs.over) com.minimal.carlauncher.core.Neon.RED else com.minimal.carlauncher.core.Neon.AMBER
+        cardGlow(color)
         binding.cameraChipTitle.text = "\uD83D\uDCF7 " + when {
             cam.cam.limit > 0 -> "SPEED ${cam.cam.limit}"
             cam.cam.kind == "speed" -> "SPEED CAM"
@@ -296,24 +297,39 @@ class HomeActivity : AppCompatActivity() {
         chip.visibility = View.VISIBLE
     }
 
-    /** Three pulses of an amber / red border on the Phone Link and Music cards. */
-    private fun flashCards(color: Int) {
+    /** Border rings on the Phone Link and Music cards while a camera is ahead (null = none). */
+    private var glowColor: Int? = null
+    private var cardPulse: android.animation.ValueAnimator? = null
+    private val glowRings = HashMap<View, android.graphics.drawable.GradientDrawable>()
+    private val GLOW_STEADY = 190
+
+    /** Steady amber / red border from the first alert until the camera is passed. */
+    private fun cardGlow(color: Int?) {
+        if (color == glowColor) return
+        glowColor = color
         val d = resources.displayMetrics.density
         for (card in listOf<View>(binding.cardProjection, binding.cardMusic)) {
+            if (color == null) { card.foreground = null; glowRings.remove(card); continue }
             val ring = android.graphics.drawable.GradientDrawable().apply {
                 cornerRadius = resources.getDimension(R.dimen.corner)
                 setStroke((4f * d).toInt(), color)
-                setColor(com.minimal.carlauncher.core.Neon.alpha(color, 40))
+                setColor(com.minimal.carlauncher.core.Neon.alpha(color, 36))
+                alpha = GLOW_STEADY
             }
+            glowRings[card] = ring
             card.foreground = ring
-            android.animation.ValueAnimator.ofInt(255, 0, 255, 0, 255, 0).apply {
-                duration = 2_100L
-                addUpdateListener { ring.alpha = it.animatedValue as Int }
-                addListener(object : android.animation.AnimatorListenerAdapter() {
-                    override fun onAnimationEnd(a: android.animation.Animator) { card.foreground = null }
-                })
-                start()
-            }
+        }
+        if (color == null) { cardPulse?.cancel(); cardPulse = null }
+    }
+
+    /** Three strong pulses at an alert, then back to the steady glow. */
+    private fun flashCards(color: Int) {
+        cardGlow(color)
+        cardPulse?.cancel()
+        cardPulse = android.animation.ValueAnimator.ofInt(255, 30, 255, 30, 255, 30, GLOW_STEADY).apply {
+            duration = 2_400L
+            addUpdateListener { v -> glowRings.values.forEach { it.alpha = v.animatedValue as Int } }
+            start()
         }
     }
 
