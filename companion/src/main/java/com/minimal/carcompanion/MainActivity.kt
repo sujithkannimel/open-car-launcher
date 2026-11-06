@@ -191,7 +191,10 @@ class MainActivity : Activity() {
     /** Pending fill-ups: those in the cloud inbox plus those kept on this phone for the live link. */
     private fun withAllPending(d: CarData, cloud: List<com.minimal.carlauncher.core.InboxFill>): CarData {
         cloudPending = cloud
+        // A fill the car already merged over the live link stays in the cloud inbox until the car
+        // next has internet and deletes it: don't show that one as still waiting.
         val all = (cloud + LinkStore.localFills(this)).distinctBy { it.id }
+            .filterNot { com.minimal.carlauncher.core.FuelInbox.isDuplicate(d.fuelEvents, it) }
         return d.withPending(all, d.fuelEvents)
     }
 
