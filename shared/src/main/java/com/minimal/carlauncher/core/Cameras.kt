@@ -128,8 +128,11 @@ object Cameras {
               muted: List<Camera> = emptyList(), rangeM: Double = 700.0): CameraAhead? =
         aheadAll(cams, lat, lon, headingDeg, kmh, muted, rangeM).firstOrNull()
 
-    /** First-alert distance: the chosen one, 300 m more above 60 km/h (700 m becomes 1 km). */
-    fun alertRange(settingM: Int, kmh: Float): Double = settingM + (if (kmh > 60f) 300.0 else 0.0)
+    /** First-alert pick-up distance: the chosen one plus a little, so a 1 s fix gap doesn't make it late. */
+    fun alertRange(settingM: Int, @Suppress("UNUSED_PARAMETER") kmh: Float = 0f): Double = settingM + 60.0
+
+    /** Second reminder, when the first alert came from farther away. */
+    const val REMIND_M = 700
 
     /** Distance of the final warning. */
     const val FINAL_M = 200

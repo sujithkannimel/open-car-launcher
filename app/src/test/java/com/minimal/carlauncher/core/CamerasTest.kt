@@ -36,7 +36,7 @@ class CamerasTest {
         assertNull(Cameras.ahead(list, 8.5000, 76.9000, 180f, 50f))      // driving away
         assertNull(Cameras.ahead(list, 8.5000, 76.9000, 0f, 8f))         // crawling: heading unreliable
         assertNull(Cameras.ahead(list, 8.4950, 76.9000, 0f, 50f))        // 890 m: too far for 700 m
-        assertNotNull(Cameras.ahead(list, 8.4950, 76.9000, 0f, 70f, rangeM = Cameras.alertRange(700, 70f))) // 1 km above 60
+        assertNotNull(Cameras.ahead(list, 8.4950, 76.9000, 0f, 70f, rangeM = Cameras.alertRange(1000))) // within 1 km
         assertNotNull(Cameras.ahead(list, 8.5000, 76.9000, 50f, 50f))    // 330 m, 50 deg off: past a bend
         assertNull(Cameras.ahead(list, 8.5000, 76.8990, 90f, 50f))       // 72 deg off: beside the road, not ahead
         assertNull(Cameras.ahead(list, 8.5000, 76.9000, 0f, 50f, muted = listOf(Camera("osm:other", 8.50301, 76.90001, "ai"))))

@@ -659,7 +659,7 @@ class TripsActivity : AppCompatActivity() {
             mark(r == 700, "700 m") to { Prefs.camRangeM = 700; render() },
             mark(r == 1000, "1 km") to { Prefs.camRangeM = 1000; render() },
         )))
-        content.addView(hint("Two warnings per camera: the first at the distance above (300 m more above 60 km/h), " +
+        content.addView(hint("Up to three warnings per camera: at the distance above, again at 700 m (when the first was farther), " +
             "the last at 200 m - \"Slow down\" if you're over its limit. The voice plays over your music without pausing it. " +
             "While a camera is ahead, the home screen shows it beside the map and flashes the Phone Link and Music cards; " +
             "over Android Auto the bottom strip flashes and shows the distance. Amber, or red when over the limit. " +

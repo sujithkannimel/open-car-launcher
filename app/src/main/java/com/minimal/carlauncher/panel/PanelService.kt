@@ -142,6 +142,7 @@ class PanelService : Service() {
         if (CS.flashSeq != flashSeen) {
             flashSeen = CS.flashSeq
             if (otherApp) flashStrip()
+            if (CS.current != null) camSlotBlink()
         }
     }
 
@@ -1043,6 +1044,8 @@ class PanelService : Service() {
     private var camSlotBig: TextView? = null
     private var camSlotCaption: TextView? = null
     private var camSlotKey = ""
+    private var camSlotPulse: android.animation.ValueAnimator? = null
+    private var camSlotColor = 0
 
     /**
      * The strip's fourth tile (the Phone button's old place): the speed in km/h, so it's on
@@ -1077,6 +1080,44 @@ class PanelService : Service() {
         }
     }
 
+    /**
+     * While a camera is ahead the tile breathes between full colour and a dark centre with a
+     * thick coloured ring, and grows a little - hard to miss out of the corner of the eye.
+     */
+    private fun camSlotPulseOn(tile: View, color: Int) {
+        if (camSlotPulse != null && camSlotColor == color) return
+        camSlotPulse?.cancel()
+        camSlotColor = color
+        val bg = GradientDrawable().apply {
+            cornerRadius = px(20f).toFloat(); setColor(color); setStroke(px(4f), color)
+        }
+        tile.background = bg
+        camSlotPulse = android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 650L
+            repeatMode = android.animation.ValueAnimator.REVERSE
+            repeatCount = android.animation.ValueAnimator.INFINITE
+            addUpdateListener {
+                val f = it.animatedValue as Float
+                bg.setColor(Neon.alpha(color, (255 - 200 * f).toInt()))
+                tile.scaleX = 1f + 0.08f * (1f - f); tile.scaleY = tile.scaleX
+            }
+            start()
+        }
+    }
+
+    private fun camSlotPulseOff(tile: View) {
+        camSlotPulse?.cancel(); camSlotPulse = null
+        tile.scaleX = 1f; tile.scaleY = 1f
+    }
+
+    /** A fast triple blink of the tile at each alert (on top of the breathing). */
+    private fun camSlotBlink() {
+        val tile = camSlotTile ?: return
+        android.animation.ObjectAnimator.ofFloat(tile, View.ALPHA, 1f, 0.15f, 1f, 0.15f, 1f, 0.15f, 1f).apply {
+            duration = 1_500L; start()
+        }
+    }
+
     private fun updateCamSlot() {
         val tile = camSlotTile ?: return
         val big = camSlotBig ?: return
@@ -1091,8 +1132,9 @@ class PanelService : Service() {
             key = "c$dist${cs.over}${cam.cam.id}"
             if (key == camSlotKey) return
             big.text = "\uD83D\uDCF7 $dist"
-            big.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
-            big.setTextColor(Color.BLACK)
+            big.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f)
+            big.setTextColor(Color.WHITE)
+            big.setShadowLayer(px(3f).toFloat(), 0f, 0f, Color.BLACK)
             big.paint.shader = null
             caption.text = when {
                 cam.cam.limit > 0 -> "LIMIT ${cam.cam.limit}"
@@ -1100,7 +1142,8 @@ class PanelService : Service() {
                 else -> "AI CAM"
             } + (if (cs.another) " +1" else "")
             caption.setTextColor(color)
-            tile.background = GradientDrawable().apply { cornerRadius = px(20f).toFloat(); setColor(color) }
+            caption.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            camSlotPulseOn(tile, color)
         } else {
             val f = trips.lastFix?.takeIf { System.currentTimeMillis() - it.time < 5_000L && it.hasSpeed() }
                 ?: com.minimal.carlauncher.core.PhoneGps.fresh()
@@ -1110,9 +1153,12 @@ class PanelService : Service() {
             big.text = kmh?.toString() ?: "--"
             big.setTextSize(TypedValue.COMPLEX_UNIT_SP, 30f)
             big.setTextColor(Neon.TEXT)
+            big.setShadowLayer(0f, 0f, 0f, 0)
             big.paint.shader = null
             caption.text = "KM/H"
             caption.setTextColor(Neon.DIM)
+            caption.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+            camSlotPulseOff(tile)
             tile.background = GradientDrawable().apply { cornerRadius = px(20f).toFloat(); setColor(Neon.SURFACE) }
         }
         camSlotKey = key
@@ -1636,6 +1682,7 @@ class PanelService : Service() {
         batteryBadgeView = null
         battLabelView = null
         tripView = null
+        camSlotPulse?.cancel(); camSlotPulse = null
         camSlotTile = null; camSlotBig = null; camSlotCaption = null
         stripLine = null
         stripGlowColor = null

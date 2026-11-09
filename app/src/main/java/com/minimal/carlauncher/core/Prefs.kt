@@ -483,9 +483,9 @@ object Prefs {
         get() = sp.getString(KEY_CAM_ALERT, null) ?: if (sp.getBoolean(KEY_CAM_CHIME, true)) "voice" else "off"
         set(value) = sp.edit().putString(KEY_CAM_ALERT, value).apply()
 
-    /** First-warning distance in metres: 500, 700 or 1000 (300 m more above 60 km/h). */
+    /** First-warning distance in metres: 500, 700 or 1000 (then a reminder at 700 m). */
     var camRangeM: Int
-        get() = sp.getInt(KEY_CAM_RANGE, 700)
+        get() = sp.getInt(KEY_CAM_RANGE, 1000)
         set(value) = sp.edit().putInt(KEY_CAM_RANGE, value).apply()
 
     /** Timed acceleration runs (0-60, 0-100, 40-80), newest last. */

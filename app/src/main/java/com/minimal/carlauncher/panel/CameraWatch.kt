@@ -26,6 +26,7 @@ internal class CameraWatch(private val context: Context) {
     private val voice by voiceLazy
     private var track: CameraTrack? = null
     private var finalDone = false
+    private var reminderDone = false
     private var overSaid = false
     private var another = false
     /** Cameras just passed or left, by id -> elapsedRealtime: not picked up again for 3 minutes. */
@@ -53,8 +54,9 @@ internal class CameraWatch(private val context: Context) {
             voice.alert(if (over) slowDown(a) else name(a) + " ahead" + then(), if (over) 3 else 2)
         } else {
             finalDone = false; overSaid = false
-            voice.alert(name(a) + (if (a.cam.limit > 0) ", limit ${a.cam.limit}," else "") +
-                " in " + CameraVoice.distanceWords(a.distanceM.toDouble()) + then(), 1)
+            // Picked up from farther than ~800 m: say it again at 700 m.
+            reminderDone = a.distanceM <= Cameras.REMIND_M + 100
+            voice.alert(inWords(a, a.distanceM.toDouble()), 1)
         }
         CameraStore.setCurrent(a, over, another, flash = true)
     }
@@ -69,7 +71,11 @@ internal class CameraWatch(private val context: Context) {
         val a = CameraAhead(t.cam, t.distanceM.roundToInt())
         val over = isOver(a, kmh)
         var flash = false
-        if (!finalDone && a.distanceM <= Cameras.FINAL_M) {
+        if (!reminderDone && !finalDone && a.distanceM <= Cameras.REMIND_M && a.distanceM > Cameras.FINAL_M + 100) {
+            reminderDone = true; flash = true
+            voice.alert(if (over) slowDown(a) + ", camera in 700 metres" else inWords(a, Cameras.REMIND_M.toDouble()), if (over) 3 else 1)
+        } else if (!finalDone && a.distanceM <= Cameras.FINAL_M) {
+            reminderDone = true
             finalDone = true; overSaid = over; flash = true
             voice.alert(if (over) slowDown(a) else "Camera ahead", if (over) 3 else 2)
         } else if (finalDone && over && !overSaid) {
@@ -90,6 +96,9 @@ internal class CameraWatch(private val context: Context) {
     private fun name(a: CameraAhead) = if (a.cam.kind == "speed") "Speed camera" else "AI camera"
     private fun slowDown(a: CameraAhead) = "Slow down, limit ${a.cam.limit}"
     private fun then() = if (another) ", then another camera" else ""
+    /** "AI camera in 700 metres", "Speed camera, limit 50, in 1 kilometre". */
+    private fun inWords(a: CameraAhead, m: Double) = name(a) + (if (a.cam.limit > 0) ", limit ${a.cam.limit}," else "") +
+        " in " + CameraVoice.distanceWords(m) + then()
 
     fun release() { if (voiceLazy.isInitialized()) voice.release() }
 
