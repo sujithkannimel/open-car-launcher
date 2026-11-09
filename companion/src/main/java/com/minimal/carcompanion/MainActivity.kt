@@ -466,7 +466,7 @@ class MainActivity : Activity() {
         val restDay = d.battery.lastOrNull { it.resting > 0f }
         val chargeDay = d.battery.lastOrNull { it.chargeN > 0 }
         val band = restDay?.let { BatteryHealth.restingBand(it.resting) }
-        val chargeOk = chargeDay?.let { it.chargeAvg >= BatteryHealth.CHARGE_LOW && it.chargeMax <= BatteryHealth.CHARGE_HIGH }
+        val chargeOk = chargeDay?.let { BatteryHealth.chargingOk(it) }
         grid(listOf(
             Stat(when {
                 range in 0..FuelModel.RESERVE_KM -> "Now"
@@ -481,8 +481,8 @@ class MainActivity : Activity() {
             Stat(if (d.estOdometer >= 0) String.format(Locale.US, "%,d", d.estOdometer) else "--", "Odometer km (est.)", TEXT),
             Stat(restDay?.let { String.format(Locale.US, "%.1f V", it.resting) } ?: "--",
                 "Battery at rest" + (band?.let { " \u00B7 " + shortBand(it) } ?: ""), bandColor(band)),
-            Stat(chargeDay?.let { String.format(Locale.US, "%.1f V", it.chargeAvg) } ?: "--",
-                when (chargeOk) { true -> "Charging \u00B7 OK"; false -> "Charging \u00B7 Low"; null -> "Charging" },
+            Stat(chargeDay?.let { String.format(Locale.US, "%.1f V", it.chargeMax) } ?: "--",
+                when (chargeOk) { true -> "Charging peak \u00B7 OK"; false -> "Charging \u00B7 Check"; null -> "Charging" },
                 when (chargeOk) { true -> GREEN; false -> AMBER; null -> TEXT }),
         ))
 
@@ -508,8 +508,7 @@ class MainActivity : Activity() {
         if (band == BatteryHealth.Rest.POOR || band == BatteryHealth.Rest.WEAK)
             alerts += "Battery reads ${shortBand(band!!).lowercase(Locale.US)} at rest (${String.format(Locale.US, "%.1f V", restDay!!.resting)}). Get it tested." to
                 (if (band == BatteryHealth.Rest.POOR) RED else AMBER)
-        if (chargeOk == false)
-            alerts += String.format(Locale.US, "Charging averaged %.1f V while driving (healthy 13.2 - 15.0 V).", chargeDay!!.chargeAvg) to AMBER
+        if (chargeOk == false) BatteryHealth.chargingProblem(chargeDay!!)?.let { alerts += it to AMBER }
         val trend = BatteryHealth.trendPer30Days(d.battery)
         if (trend != null && trend <= -0.04) alerts += "Battery " + BatteryHealth.trendLabel(trend).lowercase(Locale.US) to AMBER
         if (lvl >= 3) alerts += "Fuel low: about $range km left." to (if (lvl == 4) RED else AMBER)

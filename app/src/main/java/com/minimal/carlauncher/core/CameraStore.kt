@@ -7,7 +7,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * The car's camera lists: OpenStreetMap cameras (built-in copy until the phone sends a newer
- * one), cameras marked by hand in older versions, and cameras the driver muted. Updates from the phone only
+ * one) and cameras the driver muted. Updates from the phone only
  * replace the OpenStreetMap list; the driver's own lists are never touched by them.
  *
  * Also holds the warning currently shown ([current]) for the home screen and the panel.
@@ -15,7 +15,6 @@ import java.util.concurrent.CopyOnWriteArrayList
 object CameraStore {
 
     @Volatile private var osm: CameraSet? = null
-    @Volatile private var mineCache: List<Camera>? = null
     @Volatile private var mutedCache: List<Camera>? = null
 
     /** The warning shown now, or null. */
@@ -39,11 +38,17 @@ object CameraStore {
         Cameras.decodeSet(context.assets.open("cameras_seed.json").bufferedReader().use { it.readText() })
     } catch (_: Exception) { null } ?: CameraSet("none", 0L, emptyList())
 
-    fun mine(): List<Camera> = mineCache ?: Cameras.decode(Prefs.camMine).also { mineCache = it }
     fun muted(): List<Camera> = mutedCache ?: Cameras.decode(Prefs.camMuted).also { mutedCache = it }
 
-    /** Everything that can warn: OpenStreetMap plus the driver's own. */
-    fun all(context: Context): List<Camera> = osmSet(context).cams + mine()
+    /**
+     * Everything that can warn: the OpenStreetMap list. Cameras marked by hand in older
+     * versions are deleted the first time (marking was dropped as not needed).
+     */
+    fun all(context: Context): List<Camera> {
+        if (!mineCleared) { mineCleared = true; if (Prefs.camMine.isNotEmpty()) Prefs.camMine = "" }
+        return osmSet(context).cams
+    }
+    @Volatile private var mineCleared = false
 
     /** A newer list from the phone. False if it was refused (broken or much smaller). */
     fun replaceOsm(context: Context, set: CameraSet): Boolean {

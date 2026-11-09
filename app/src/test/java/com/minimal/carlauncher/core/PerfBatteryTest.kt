@@ -67,4 +67,47 @@ class PerfBatteryTest {
         assertEquals(BatteryHealth.Level.UNKNOWN, BatteryHealth.verdict(emptyList()).level)
         assertEquals(days, BatteryHealth.decode(BatteryHealth.encode(days)))
     }
+
+    @Test fun smartChargingDoesNotAlarm() {
+        val w = ChargeWatch()
+        var t = 0L
+        var raised = 0
+        // 30 min of smart charging: 12.6 V cruising, a 14.5 V charge every 4 minutes.
+        repeat(60) { i ->
+            t += 30_000L
+            val s = w.feed(t, if (i % 8 == 0) 14.5f else 12.6f)
+            if (s.newlyRaised) raised++
+        }
+        assertEquals(0, raised)
+        assertEquals(0, w.alert)
+    }
+
+    @Test fun deadAlternatorAlarmsOnceAndDrainIsCounted() {
+        val w = ChargeWatch()
+        var t = 0L; var raised = 0; var drain = 0
+        repeat(40) {                                    // 20 min, never charging, 12.2 V
+            t += 30_000L
+            val s = w.feed(t, 12.2f)
+            if (s.newlyRaised) raised++
+            drain += s.drainSec
+        }
+        assertEquals(1, raised)
+        assertEquals(1, w.alert)
+        assertEquals(39 * 30, drain)
+        assertEquals(0, w.feed(t + 30_000L, 14.2f).alert)   // charging again clears it
+        assertEquals(false, w.feed(t + 60_000L, 12.0f).newlyRaised)
+    }
+
+    @Test fun overchargeAndVerdictUsesMaxNotAverage() {
+        val w = ChargeWatch()
+        w.feed(0L, 15.3f)
+        val s = w.feed(30_000L, 15.4f)
+        assertEquals(2, s.alert); assertEquals(true, s.newlyRaised)
+        var days = BatteryHealth.addResting(emptyList(), "2026-11-09", 12.6f)
+        repeat(12) { i -> days = BatteryHealth.addCharging(days, "2026-11-09", if (i % 3 == 0) 14.4f else 12.7f) }
+        assertEquals(BatteryHealth.Level.GOOD, BatteryHealth.verdict(days).level)   // avg 13.3 is fine with smart charging
+        days = BatteryHealth.addDrain(days, "2026-11-09", 600)
+        assertEquals(BatteryHealth.Level.WATCH, BatteryHealth.verdict(days).level)
+        assertEquals(600, BatteryHealth.decode(BatteryHealth.encode(days)).first().drainSec)
+    }
 }

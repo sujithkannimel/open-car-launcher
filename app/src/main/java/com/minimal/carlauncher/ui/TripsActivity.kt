@@ -571,7 +571,7 @@ class TripsActivity : AppCompatActivity() {
             com.minimal.carlauncher.core.BatteryHealth.Rest.POOR -> RED
             null -> TEXT
         }
-        val chargeOk = lastCharge?.let { it.chargeMin >= bh.CHARGE_LOW && it.chargeMax <= bh.CHARGE_HIGH }
+        val chargeOk = lastCharge?.let { bh.chargingOk(it) }
         content.addView(statRow(listOf(
             Stat(if (v > 0f) String.format(Locale.US, "%.1f V", v) else "--", "NOW", CYAN),
             Stat(lastRest?.let { String.format(Locale.US, "%.2f V", it.resting) } ?: "--",
@@ -582,6 +582,14 @@ class TripsActivity : AppCompatActivity() {
             Stat(lastCharge?.let { String.format(Locale.US, "%.1f-%.1f", it.chargeMin, it.chargeMax) } ?: "--",
                 "CHARGING RANGE, V (${lastCharge?.day?.let { day.format(java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(it)!!) } ?: "-"})", TEXT),
         )))
+
+        lastCharge?.let { lc ->
+            bh.chargingProblem(lc)?.let { content.addView(body("\u26A0 $it")) }
+            if (lc.drainSec in 1 until 300) content.addView(body(String.format(Locale.US,
+                "Ran on battery under %.1f V for %d min while driving - normal smart charging dips are fine.", bh.DRAIN_V, (lc.drainSec + 59) / 60)))
+        }
+        content.addView(body("Your car charges \"smart\": the alternator rests while cruising (12.4 - 13.2 V is normal) and charges hard " +
+            "when you slow down (14 - 15 V). Only time under 12.4 V means the battery is running down."))
 
         content.addView(section("Resting voltage at start"))
         val chart = KmplChartView(this).apply {

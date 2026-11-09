@@ -9,7 +9,12 @@ import org.json.JSONObject
  * - Resting voltage: a reading in the first minutes after ignition on, before the engine is
  *   charging (< 13.0 V, not moving). The lowest one each day is kept, which is usually the
  *   morning start after the longest rest. A slow decline over weeks means an ageing battery.
- * - Charging voltage: readings while moving. Healthy alternator output is 13.2 - 15.0 V.
+ * - Charging voltage: readings while moving. Healthy alternator output is 13.2 - 15.0 V, but
+ *   Maruti (and most modern cars) charge "smart": the engine computer switches the alternator
+ *   off while cruising or accelerating and charges hard when slowing down, so 12.4 - 13.2 V
+ *   while driving is normal. Under 12.4 V the battery itself is being drained ([drainSec]).
+ * - Resting voltage only counts after the car stood for 2 h: right after driving the battery
+ *   shows a "surface charge" that reads higher than its real state.
  *
  * The head unit measures at its own supply wire, typically 0.1 - 0.2 V below the battery
  * terminals, so the bands below are set slightly lower than textbook values.
@@ -22,6 +27,7 @@ data class BatteryDay(
     val chargeMin: Float = -1f,
     val chargeMax: Float = -1f,
     val crank: Float = -1f,      // lowest voltage caught while the engine was cranking, -1 = none
+    val drainSec: Int = 0,       // seconds driven under DRAIN_V (battery running down while moving)
 ) {
     val chargeAvg: Float get() = if (chargeN > 0) (chargeSum / chargeN).toFloat() else -1f
 }
@@ -32,6 +38,12 @@ object BatteryHealth {
     const val CHARGE_LOW = 13.2f
     const val CHARGE_HIGH = 15.0f
     const val RESTING_MAX = 13.0f
+    /** While driving, under this the battery is supplying the car instead of being charged. */
+    const val DRAIN_V = 12.4f
+    /** A charging system that works reaches this at least sometimes on a day of driving. */
+    const val FULL_CHARGE_V = 13.8f
+    /** Parked at least this long before a start for its resting reading to count (no surface charge). */
+    const val REST_PARKED_MS = 2 * 60 * 60_000L
 
     enum class Rest(val label: String) { GOOD("Good"), OK("OK"), WEAK("Weak"), POOR("Poor - get it tested") }
 
@@ -129,8 +141,13 @@ object BatteryHealth {
             }
         }
         charge?.let {
-            if (it.chargeAvg < CHARGE_LOW) worse(Level.WATCH, "Alternator low (%.1f V while driving)".format(it.chargeAvg))
+            // Smart charging makes the average meaningless; a working alternator still reaches
+            // full charging voltage some of the time.
+            if (it.chargeN >= 10 && it.chargeMax < FULL_CHARGE_V)
+                worse(Level.WATCH, "Alternator never reached full charge (max %.1f V while driving)".format(it.chargeMax))
             if (it.chargeMax > CHARGE_HIGH) worse(Level.WATCH, "Overcharging (up to %.1f V)".format(it.chargeMax))
+            if (it.drainSec >= 300)
+                worse(Level.WATCH, "Battery ran down while driving for %d min (under %.1f V)".format(it.drainSec / 60, DRAIN_V))
         }
         if (trend != null && trend <= -0.10) worse(Level.WATCH, "Resting voltage falling %.2f V a month".format(trend))
         val title = when (level) {
@@ -144,6 +161,22 @@ object BatteryHealth {
 
     fun addResting(days: List<BatteryDay>, day: String, v: Float): List<BatteryDay> = upsert(days, day) {
         it.copy(resting = if (it.resting < 0f) v else minOf(it.resting, v))
+    }
+
+    /** A day's charging looks right: full voltage reached at times, no overcharge, little draining. */
+    fun chargingOk(d: BatteryDay): Boolean =
+        (d.chargeN < 10 || d.chargeMax >= FULL_CHARGE_V) && d.chargeMax <= CHARGE_HIGH && d.drainSec < 300
+
+    /** What's wrong with a day's charging, for alerts (null if [chargingOk]). */
+    fun chargingProblem(d: BatteryDay): String? = when {
+        d.chargeMax > CHARGE_HIGH -> "Overcharging: up to %.1f V while driving (healthy up to 15.0 V).".format(d.chargeMax)
+        d.chargeN >= 10 && d.chargeMax < FULL_CHARGE_V -> "Charging never reached %.1f V while driving (max %.1f V): have the alternator checked.".format(FULL_CHARGE_V, d.chargeMax)
+        d.drainSec >= 300 -> "The battery ran down while driving for %d min (under %.1f V): it can't hold up between charges.".format(d.drainSec / 60, DRAIN_V)
+        else -> null
+    }
+
+    fun addDrain(days: List<BatteryDay>, day: String, sec: Int): List<BatteryDay> = upsert(days, day) {
+        it.copy(drainSec = it.drainSec + sec)
     }
 
     fun addCharging(days: List<BatteryDay>, day: String, v: Float): List<BatteryDay> = upsert(days, day) {
@@ -198,6 +231,7 @@ object BatteryHealth {
         days.forEach { d ->
             put(JSONObject().put("d", d.day).put("r", d.resting.toDouble()).put("cs", d.chargeSum)
                 .put("cn", d.chargeN).put("lo", d.chargeMin.toDouble()).put("hi", d.chargeMax.toDouble())
+                .put("ds", d.drainSec)
                 .put("k", d.crank.toDouble()))
         }
     }.toString()
@@ -214,10 +248,58 @@ object BatteryHealth {
                     o.optString("d"), rest, o.optDouble("cs", 0.0),
                     o.optInt("cn"), o.optDouble("lo", -1.0).toFloat(), o.optDouble("hi", -1.0).toFloat(),
                     o.optDouble("k", -1.0).toFloat(),
+                    o.optInt("ds", 0),
                 )
             }
         } catch (_: Exception) {
             emptyList()
         }
+    }
+}
+
+/**
+ * The live "not charging" / "overcharging" alert while driving, aware of smart charging.
+ * Feed it every voltage reading taken while moving, with an elapsed-time clock in ms.
+ *
+ * - Not charging: no charging reading (>= 13.2 V) for 10 minutes of driving AND under 12.6 V
+ *   now. A smart alternator charges every few minutes when slowing down; a failed one never
+ *   does. Logged once per trip; it clears at the next charging reading.
+ * - Overcharging: two readings in a row over 15.0 V.
+ * - Drain: seconds between consecutive readings both under 12.4 V are returned for the day log.
+ */
+class ChargeWatch {
+    var alert = 0                 // 0 none, 1 not charging, 2 overcharging
+        private set
+    private var lastT = -1L
+    private var lastV = 0f
+    private var noChargeMs = 0L
+    private var highCount = 0
+    private val warned = BooleanArray(3)
+
+    /** New trip: the alert may be logged once more. */
+    fun reset() { lastT = -1L; noChargeMs = 0L; highCount = 0; alert = 0; warned.fill(false) }
+
+    /** The car stopped: gaps while standing don't count as driving time. */
+    fun pause() { lastT = -1L }
+
+    data class Step(val alert: Int, val newlyRaised: Boolean, val drainSec: Int)
+
+    fun feed(t: Long, v: Float): Step {
+        val dt = if (lastT >= 0L && t > lastT && t - lastT <= 90_000L) t - lastT else 0L
+        var drain = 0
+        if (dt > 0 && v < BatteryHealth.DRAIN_V && lastV < BatteryHealth.DRAIN_V) drain = (dt / 1000L).toInt()
+        if (v >= BatteryHealth.CHARGE_LOW) noChargeMs = 0L else noChargeMs += dt
+        highCount = if (v > BatteryHealth.CHARGE_HIGH) highCount + 1 else 0
+        lastT = t; lastV = v
+        val now = when {
+            highCount >= 2 -> 2
+            noChargeMs >= 10 * 60_000L && v < 12.6f -> 1
+            alert == 1 && v < BatteryHealth.CHARGE_LOW -> 1          // stays up until it charges again
+            else -> 0
+        }
+        val raised = now != 0 && now != alert && !warned[now]
+        if (raised) warned[now] = true
+        alert = now
+        return Step(now, raised, drain)
     }
 }

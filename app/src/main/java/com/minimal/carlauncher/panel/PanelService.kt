@@ -1373,7 +1373,7 @@ class PanelService : Service() {
             trips.finishTrip()
             trips.beginTrip(now)
             ignitionElapsed = SystemClock.elapsedRealtime()
-            battery.onIgnition()
+            battery.onIgnition(if (last > 0L) now - last else Long.MAX_VALUE)
             zlink.onIgnition()
             log("ignition on (new trip) -- ZLink guard active")
         }
