@@ -330,6 +330,36 @@ class MainActivity : Activity() {
         }.start()
     }
 
+    /**
+     * Puts the car's latest log, its live data (battery, trips, fuel - the same as its own
+     * backups, no tokens or keys) and the phone's log into diagnostics/ in the private backup
+     * repo, so they can be looked at without screenshots.
+     */
+    private fun sendDiagnostics() {
+        val repo = repoName; val token = this.token
+        if (repo.isBlank() || token.isBlank()) {
+            Toast.makeText(this, "Set up Cloud backup first", Toast.LENGTH_LONG).show(); return
+        }
+        val now = System.currentTimeMillis()
+        val o = org.json.JSONObject()
+            .put("sentAt", java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss Z", Locale.US).format(Date(now)))
+            .put("carVersion", LinkStore.carVersion(this))
+            .put("phoneVersion", myVersion)
+            .put("carDataAt", LinkStore.liveAt(this).takeIf { it > 0 }?.let {
+                java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date(it)) } ?: "never")
+            .put("carLog", LinkStore.diag(this))
+            .put("phoneLog", LinkStore.phoneLog(this))
+        LinkStore.cachedJson(this)?.let { j -> try { o.put("car", org.json.JSONObject(j)) } catch (_: Exception) {} }
+        val name = "diag_" + java.text.SimpleDateFormat("yyyy-MM-dd_HHmmss", Locale.US).format(Date(now)) + ".json"
+        Toast.makeText(this, "Sending…", Toast.LENGTH_SHORT).show()
+        Thread {
+            val err = CarCloud.putDiagnostics(repo, token, name, o.toString(1))
+            runOnUiThread {
+                Toast.makeText(this, err?.let { "Not sent: $it" } ?: "Sent to the cloud as $name", Toast.LENGTH_LONG).show()
+            }
+        }.start()
+    }
+
     private fun showDiagnostics() {
         val phone = LinkStore.phoneLog(this)
         val text = (if (phone.isNotEmpty()) "Phone:\n$phone\n\nCar:\n" else "") +
@@ -785,6 +815,7 @@ class MainActivity : Activity() {
             }
         }
         link("Head unit diagnostics") { showDiagnostics() }
+        link("Send diagnostics to cloud (for troubleshooting)") { sendDiagnostics() }
         fun adbLabel() = if (AdbBridge.isOn()) "ADB bridge: ON until " + timeFmt.format(Date(AdbBridge.until)) + " (tap to turn off)"
             else "ADB bridge to the car (30 min)"
         link(adbLabel()) {

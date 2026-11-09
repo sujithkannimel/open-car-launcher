@@ -72,11 +72,16 @@ object BatteryHealth {
      * one reading at rest before it, and the dip at least 0.4 V under that rest.
      */
     fun crankDip(beforeCharge: List<Float>): Float? {
-        if (beforeCharge.size < 2) return null
-        val rest = beforeCharge.first()
+        if (beforeCharge.isEmpty()) return null
         val low = beforeCharge.min()
-        return low.takeIf { rest - it >= 0.4f && it > 6f }
+        if (low <= 6f) return null
+        // Below 10.5 V the starter was turning: no battery that then starts the engine rests there.
+        if (low < MIN_RESTING) return low
+        return low.takeIf { beforeCharge.size >= 2 && beforeCharge.first() - it >= 0.4f }
     }
+
+    /** Lowest believable resting reading: anything under it was taken while cranking. */
+    const val MIN_RESTING = 10.5f
 
     /**
      * Splits the readings taken between ignition and the first charging reading into the
@@ -86,8 +91,10 @@ object BatteryHealth {
         if (samples.isEmpty()) return null to null
         val crank = crankDip(samples)
         val first = samples.first()
-        val before = if (crank == null) samples else samples.takeWhile { first - it < 0.4f }
-        return before.minOrNull() to crank
+        // Resting = the readings before the starter turned, never a cranking reading.
+        val before = if (crank == null) samples
+            else samples.takeWhile { it >= MIN_RESTING && first - it < 0.4f }
+        return before.filter { it >= MIN_RESTING }.minOrNull() to crank
     }
 
     fun addCrank(days: List<BatteryDay>, day: String, v: Float): List<BatteryDay> = upsert(days, day) {
@@ -201,8 +208,10 @@ object BatteryHealth {
             val a = JSONArray(json)
             (0 until a.length()).mapNotNull { i ->
                 val o = a.optJSONObject(i) ?: return@mapNotNull null
+                // Older versions could save a cranking reading as "resting": drop those.
+                val rest = o.optDouble("r", -1.0).toFloat().let { if (it in 0f..MIN_RESTING - 0.001f) -1f else it }
                 BatteryDay(
-                    o.optString("d"), o.optDouble("r", -1.0).toFloat(), o.optDouble("cs", 0.0),
+                    o.optString("d"), rest, o.optDouble("cs", 0.0),
                     o.optInt("cn"), o.optDouble("lo", -1.0).toFloat(), o.optDouble("hi", -1.0).toFloat(),
                     o.optDouble("k", -1.0).toFloat(),
                 )

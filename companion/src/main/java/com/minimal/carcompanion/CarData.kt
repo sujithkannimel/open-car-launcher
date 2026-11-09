@@ -128,6 +128,25 @@ object CarCloud {
      * Newest data: latest.json when present (updated after every trip), compared with the
      * newest dated backups by their creation time. Blocking: call off the main thread.
      */
+    /**
+     * Uploads a diagnostics snapshot to diagnostics/<name> in the private repo (a new file each
+     * time, so nothing is overwritten). Returns an error message, or null on success.
+     */
+    fun putDiagnostics(repoName: String, token: String, name: String, json: String): String? = try {
+        val body = JSONObject()
+            .put("message", "Diagnostics from phone")
+            .put("content", java.util.Base64.getEncoder().encodeToString(json.toByteArray()))
+        val r = call("PUT", "${repo(repoName)}/contents/diagnostics/$name", token, body.toString())
+        when (r.code) {
+            200, 201 -> null
+            401 -> "Token not accepted"
+            403, 404 -> "This token can't write to the repo. Give it Contents: Read and write."
+            else -> "GitHub replied ${r.code}"
+        }
+    } catch (_: Exception) {
+        "No connection"
+    }
+
     /** Saves a fill-up for the car to pick up. Returns an error message, or null on success. */
     fun putFill(repoName: String, token: String, f: InboxFill): String? = try {
         val body = JSONObject()

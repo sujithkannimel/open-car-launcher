@@ -400,6 +400,8 @@ object LinkStore {
     fun setMediaOn(c: Context, on: Boolean) = sp(c).edit().putBoolean("mediaOn", on).apply()
     fun carVersion(c: Context): String = sp(c).getString("carVersion", "") ?: ""
     fun diag(c: Context): String = sp(c).getString("diag", "") ?: ""
+    /** The car's own data as it last sent it (its backup JSON: no tokens or keys). */
+    fun cachedJson(c: Context): String? = sp(c).getString("cache", null)?.takeIf { it.isNotBlank() }
 
     /** The phone's own link log (newest first, last 20 lines), shown above the car's diagnostics. */
     @Synchronized

@@ -38,6 +38,7 @@ import com.minimal.carlauncher.core.Prefs
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.roundToInt
 
 /**
  * Overlay panel service that draws the bottom strip in the 170 px black area
@@ -127,7 +128,7 @@ class PanelService : Service() {
         }
     }
     private val trips by lazy {
-        TripTracker(this, { volts.engineMaybeRunning() }, { handler.post { liveLinkTick() } }) { cameras.onFix(it) }
+        TripTracker(this, { volts.engineMaybeRunning() }, { handler.post { liveLinkTick() } }) { cameras.onFix(it); updateCamSlot() }
     }
     private val cameras by lazy { CameraWatch(this) }
     private var flashSeen = 0
@@ -156,6 +157,7 @@ class PanelService : Service() {
                 if (!pg.streaming && pg.available && trips.isListening)
                     pg.start({ l -> handler.post { trips.onPhoneFix(l) } }) { msg -> handler.post { log(msg) } }
             }
+            updateCamSlot()                              // speed goes to "--" when fixes stop
             handler.postDelayed(this, 5_000L)
         }
     }
@@ -530,15 +532,16 @@ class PanelService : Service() {
         val btnHome = dockButton(R.drawable.ic_panel_home, "Home") { openHomeDashboard() }
         val btnApps = dockButton(R.drawable.ic_panel_apps, "Apps") { openAppGrid() }
         val btnNav = dockButton(R.drawable.ic_panel_nav, "Maps") { openMaps() }
-        val btnPhone = dockButton(R.drawable.ic_panel_phone, "Phone") { openDialer() }
         shownDockActive = -2
         updateDockActive()
 
-        for (b in listOf(btnHome, btnApps, btnNav, btnPhone)) {
+        for (b in listOf(btnHome, btnApps, btnNav)) {
             centerBar.addView(b, LinearLayout.LayoutParams(W, W).apply {
                 leftMargin = px(10f); rightMargin = px(10f)
             })
         }
+        // Where the Phone button was: speed, or the camera warning while one is ahead.
+        centerBar.addView(buildCamSlot(), LinearLayout.LayoutParams(W, W).apply { leftMargin = px(10f); rightMargin = px(10f) })
 
         if (adjusting) {
             root.addView(buildAdjustBar(), FrameLayout.LayoutParams(W, h, Gravity.CENTER))
@@ -1029,18 +1032,90 @@ class PanelService : Service() {
             evaluateBatteryState(volt.removeSuffix("V").toFloatOrNull())
             val icon = BATT_ICONS[shownBattState.coerceAtLeast(0)]
             batteryDisplay?.text = "$icon $volt"
-            // A camera warning takes the trip timer's place on the strip (it's on top of every app).
-            val cam = com.minimal.carlauncher.core.CameraStore.current
-            tripView?.apply {
-                if (cam == null) { text = trips.tripText(); setTextColor(Neon.TEXT_2) }
-                else {
-                    val kmh = (trips.lastFix?.speed ?: 0f) * 3.6f
-                    val over = cam.cam.limit > 0 && kmh > cam.cam.limit + 3
-                    text = "\uD83D\uDCF7 " + (if (cam.cam.limit > 0) "${cam.cam.limit} \u00B7 " else "") + "${cam.distanceM} m"
-                    setTextColor(if (over || com.minimal.carlauncher.core.CameraStore.over) Neon.RED else Neon.AMBER)
-                }
-            }
+            tripView?.apply { text = trips.tripText(); setTextColor(Neon.TEXT_2) }
+            updateCamSlot()
         }
+    }
+
+    // --------------------------------------------------------------------- speed / camera slot
+
+    private var camSlotTile: FrameLayout? = null
+    private var camSlotBig: TextView? = null
+    private var camSlotCaption: TextView? = null
+    private var camSlotKey = ""
+
+    /**
+     * The strip's fourth tile (the Phone button's old place): the speed in km/h, so it's on
+     * screen over Android Auto too; while a camera is ahead it turns amber (red when over the
+     * limit) with the distance, and "AI CAM" / "LIMIT 50" underneath.
+     */
+    private fun buildCamSlot(): View {
+        val tile = FrameLayout(this).apply { elevation = px(4f).toFloat(); minimumWidth = px(96f) }
+        val big = TextView(this).apply {
+            gravity = Gravity.CENTER
+            includeFontPadding = false
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(px(10f), 0, px(10f), 0)
+        }
+        tile.addView(big, FrameLayout.LayoutParams(W, M, Gravity.CENTER))
+        val caption = TextView(this).apply {
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+            gravity = Gravity.CENTER
+            letterSpacing = 0.04f
+            includeFontPadding = false
+            typeface = Typeface.DEFAULT_BOLD
+        }
+        camSlotTile = tile; camSlotBig = big; camSlotCaption = caption
+        camSlotKey = ""
+        updateCamSlot()
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            addView(tile, LinearLayout.LayoutParams(W, px(64f)))
+            addView(caption, LinearLayout.LayoutParams(W, W).apply { topMargin = px(6f) })
+            addView(View(context), LinearLayout.LayoutParams(px(44f), px(6f)).apply { topMargin = px(2f) })
+        }
+    }
+
+    private fun updateCamSlot() {
+        val tile = camSlotTile ?: return
+        val big = camSlotBig ?: return
+        val caption = camSlotCaption ?: return
+        val cs = com.minimal.carlauncher.core.CameraStore
+        val cam = cs.current
+        val key: String
+        if (cam != null) {
+            val color = if (cs.over) Neon.RED else Neon.AMBER
+            val dist = if (cam.distanceM >= 1000) String.format(Locale.US, "%.1f km", cam.distanceM / 1000.0)
+                else "${(cam.distanceM / 10) * 10} m"
+            key = "c$dist${cs.over}${cam.cam.id}"
+            if (key == camSlotKey) return
+            big.text = "\uD83D\uDCF7 $dist"
+            big.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
+            big.setTextColor(Color.BLACK)
+            big.paint.shader = null
+            caption.text = when {
+                cam.cam.limit > 0 -> "LIMIT ${cam.cam.limit}"
+                cam.cam.kind == "speed" -> "SPEED CAM"
+                else -> "AI CAM"
+            } + (if (cs.another) " +1" else "")
+            caption.setTextColor(color)
+            tile.background = GradientDrawable().apply { cornerRadius = px(20f).toFloat(); setColor(color) }
+        } else {
+            val f = trips.lastFix?.takeIf { System.currentTimeMillis() - it.time < 5_000L && it.hasSpeed() }
+                ?: com.minimal.carlauncher.core.PhoneGps.fresh()
+            val kmh = f?.speed?.let { (it * 3.6f).roundToInt() }
+            key = "s$kmh"
+            if (key == camSlotKey) return
+            big.text = kmh?.toString() ?: "--"
+            big.setTextSize(TypedValue.COMPLEX_UNIT_SP, 30f)
+            big.setTextColor(Neon.TEXT)
+            big.paint.shader = null
+            caption.text = "KM/H"
+            caption.setTextColor(Neon.DIM)
+            tile.background = GradientDrawable().apply { cornerRadius = px(20f).toFloat(); setColor(Neon.SURFACE) }
+        }
+        camSlotKey = key
     }
 
     /**
@@ -1561,6 +1636,7 @@ class PanelService : Service() {
         batteryBadgeView = null
         battLabelView = null
         tripView = null
+        camSlotTile = null; camSlotBig = null; camSlotCaption = null
         stripLine = null
         stripGlowColor = null
         fuelBadgeView = null; fuelText = null; fuelIcon = null; fuelLabel = null

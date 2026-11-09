@@ -53,6 +53,10 @@ class PerfBatteryTest {
         assertEquals(BatteryHealth.Crank.POOR, BatteryHealth.crankBand(9.2f))
         assertEquals(12.2f to 10.1f, BatteryHealth.splitStart(listOf(12.3f, 12.2f, 10.1f, 11.5f)))
         assertEquals(12.1f to null, BatteryHealth.splitStart(listOf(12.3f, 12.1f)))
+        assertEquals(null to 7.6f, BatteryHealth.splitStart(listOf(7.6f)))                 // only the crank was caught
+        assertEquals(null to 9.5f, BatteryHealth.splitStart(listOf(9.5f, 12.1f)))
+        assertEquals(11.8f to 7.4f, BatteryHealth.splitStart(listOf(11.8f, 7.4f, 11.9f)))
+        assertEquals(-1f, BatteryHealth.decode("[{\"d\":\"2026-11-02\",\"r\":7.6}]").first().resting)
 
         var days = BatteryHealth.addResting(emptyList(), "2026-11-01", 12.5f)
         assertEquals(BatteryHealth.Level.GOOD, BatteryHealth.verdict(days).level)
