@@ -64,6 +64,7 @@ class MainActivity : Activity() {
         private const val TAB_TRIPS = 1
         private const val TAB_FUEL = 2
         private const val TAB_BATTERY = 3
+        private const val TAB_DIAG = 4
 
         private const val RELEASES =
             "https://api.github.com/repos/sujithkannimel/open-car-launcher/releases?per_page=10"
@@ -140,7 +141,8 @@ class MainActivity : Activity() {
             setPadding(px(8), px(10), px(8), px(10))
         }
         listOf("Home" to R.drawable.ic_home, "Trips" to R.drawable.ic_car,
-            "Fuel" to R.drawable.ic_fuel, "Battery" to R.drawable.ic_battery).forEachIndexed { i, (name, iconRes) ->
+            "Fuel" to R.drawable.ic_fuel, "Battery" to R.drawable.ic_battery,
+            "Checks" to R.drawable.ic_diag).forEachIndexed { i, (name, iconRes) ->
             val cell = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
                 setOnClickListener { select(i) }
@@ -208,17 +210,27 @@ class MainActivity : Activity() {
     private val ticker = object : Runnable {
         override fun run() { if (data?.live == true) render(); subtitle.postDelayed(this, 15_000) }
     }
+    /** Refreshes the live tyre card while TPMS is on (readings arrive from the BLE scan, off-link). */
+    private val tyreTicker = object : Runnable {
+        override fun run() {
+            if (TpmsScanner.enabled(this@MainActivity) && (tab == TAB_HOME || tab == TAB_DIAG)) render()
+            subtitle.postDelayed(this, 4_000)
+        }
+    }
 
     override fun onResume() {
         super.onResume()
         LinkStore.addListener(liveListener)
+        if (TpmsScanner.canScan(this)) TpmsScanner.start(this)
         subtitle.postDelayed(ticker, 15_000)
+        subtitle.postDelayed(tyreTicker, 4_000)
         CameraUpdater.maybeFetch(this)       // first list right after install, then weekly
     }
 
     override fun onPause() {
         LinkStore.removeListener(liveListener)
         subtitle.removeCallbacks(ticker)
+        subtitle.removeCallbacks(tyreTicker)
         super.onPause()
     }
 
@@ -438,7 +450,8 @@ class MainActivity : Activity() {
             TAB_HOME -> renderHome(d)
             TAB_TRIPS -> renderTrips(d)
             TAB_FUEL -> renderFuel(d)
-            else -> renderBattery(d)
+            TAB_BATTERY -> renderBattery(d)
+            else -> renderDiagnosis(d)
         }
     }
 
@@ -467,6 +480,7 @@ class MainActivity : Activity() {
             if (d.pending.isNotEmpty()) hero.addView(small("Includes ${d.pending.size} fill-up(s) from this phone, waiting for the car to sync."))
         }
         content.addView(hero, lp(bottom = 12))
+        tyreCard()?.let { content.addView(it, lp(bottom = 12)) }
         parkedCard()?.let { content.addView(it, lp(bottom = 12)) }
         if (LinkStore.key(this) != null && LinkStore.mediaOn(this) && !PhoneMedia.hasAccess(this)) {
             val box = cardBox()
@@ -753,6 +767,68 @@ class MainActivity : Activity() {
         content.addView(hint("Healthy: at rest 12.4 V or more, charging 13.2 - 15.0 V. The head unit reads about 0.1 - 0.2 V below the battery terminals."))
     }
 
+    // ================================================================ diagnosis / checks
+
+    private fun renderDiagnosis(d: CarData) {
+        val carVer = LinkStore.carVersion(this).ifEmpty { "unknown" }
+        val box = cardBox()
+        box.addView(TextView(this).apply { text = "Head unit"; setTextColor(TEXT); textSize = 16f; typeface = Typeface.DEFAULT_BOLD })
+        box.addView(small("Car launcher $carVer" + (if (d.live) "  \u00B7  live now" else LinkStore.liveAt(this).takeIf { it > 0 }?.let { "  \u00B7  seen " + timeFmt.format(Date(it)) } ?: "  \u00B7  not connected yet")))
+        box.addView(button("Head unit diagnostics", 0) { showDiagnostics() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, px(46)).apply { topMargin = px(12) })
+        box.addView(button("Send diagnostics to cloud", R.drawable.ic_refresh) { sendDiagnostics() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, px(46)).apply { topMargin = px(8) })
+        content.addView(box, lp(bottom = 12))
+
+        val adb = cardBox()
+        adb.addView(TextView(this).apply { text = "ADB bridge"; setTextColor(TEXT); textSize = 16f; typeface = Typeface.DEFAULT_BOLD })
+        adb.addView(small(if (AdbBridge.isOn()) "ON until " + timeFmt.format(Date(AdbBridge.until)) else "Opens a path from Termux to the car's ADB for ${AdbBridge.ON_MINUTES} minutes."))
+        adb.addView(button(if (AdbBridge.isOn()) "Turn ADB bridge off" else "Turn ADB bridge on", R.drawable.ic_link) {
+            if (AdbBridge.isOn()) AdbBridge.turnOff(this) else {
+                AdbBridge.turnOn(this); LinkService.start(this)
+                AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                    .setTitle("ADB bridge on")
+                    .setMessage("In Termux:\n\nadb connect 127.0.0.1:${AdbBridge.PORT}\n\nWorks on Wi-Fi and during Android Auto while the live link is up. The car's USB debugging must be on. Off after ${AdbBridge.ON_MINUTES} min.")
+                    .setPositiveButton("OK", null).show()
+            }
+            render()
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, px(46)).apply { topMargin = px(12) })
+        content.addView(adb, lp(bottom = 12))
+    }
+
+    /** A tyre-pressure card (four wheels) from the phone's own BLE scan, or null when TPMS is off. */
+    private fun tyreCard(): View? {
+        if (!TpmsScanner.enabled(this)) return null
+        val tyres = TpmsScanner.tyresFor(this).associateBy { it.pos }
+        val box = cardBox()
+        box.addView(TextView(this).apply { text = "Tyre pressure"; setTextColor(TEXT); textSize = 16f; typeface = Typeface.DEFAULT_BOLD })
+        if (tyres.isEmpty()) {
+            box.addView(small("Waiting for the sensors. Be near the car and drive a little to wake them."))
+            return box
+        }
+        fun cell(pos: String): View {
+            val t = tyres[pos]
+            val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(px(4), px(8), px(4), px(8)) }
+            val label = com.minimal.carlauncher.core.Tpms.posLabel(pos)
+            col.addView(TextView(this).apply {
+                text = t?.let { "${it.psi.toInt()} psi" } ?: "--"
+                setTextColor(when { t == null -> DIM; t.psi < 26 -> RED; t.psi < 28 -> AMBER; else -> GREEN })
+                textSize = 24f; typeface = Typeface.DEFAULT_BOLD
+            })
+            col.addView(TextView(this).apply {
+                text = label.uppercase(Locale.US) + (t?.let { if (it.tempC >= 0) "  \u00B7 ${it.tempC.toInt()}\u00B0C" else "" } ?: "")
+                setTextColor(DIM); textSize = 11f
+            })
+            return col
+        }
+        fun row(a: String, b: String) = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(cell(a), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(cell(b), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        }
+        box.addView(row(com.minimal.carlauncher.core.Tpms.FL, com.minimal.carlauncher.core.Tpms.FR), lp(bottom = 0))
+        box.addView(row(com.minimal.carlauncher.core.Tpms.RL, com.minimal.carlauncher.core.Tpms.RR), lp(bottom = 0))
+        return box
+    }
+
     // ================================================================ data
 
     private fun refresh() {
@@ -857,23 +933,7 @@ class MainActivity : Activity() {
                 runOnUiThread { text = camLabel(); Toast.makeText(this@MainActivity, "Cameras: $msg", Toast.LENGTH_LONG).show() }
             }
         }
-        link("Head unit diagnostics") { showDiagnostics() }
-        link("Send diagnostics to cloud (for troubleshooting)") { sendDiagnostics() }
-        fun adbLabel() = if (AdbBridge.isOn()) "ADB bridge: ON until " + timeFmt.format(Date(AdbBridge.until)) + " (tap to turn off)"
-            else "ADB bridge to the car (30 min)"
-        link(adbLabel()) {
-            if (AdbBridge.isOn()) AdbBridge.turnOff(this@MainActivity) else {
-                AdbBridge.turnOn(this@MainActivity)
-                LinkService.start(this@MainActivity)
-                AlertDialog.Builder(this@MainActivity, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                    .setTitle("ADB bridge on")
-                    .setMessage("In Termux:\n\nadb connect 127.0.0.1:${AdbBridge.PORT}\nadb -s 127.0.0.1:${AdbBridge.PORT} shell\n\n" +
-                        "Works on home Wi-Fi and during Android Auto, as long as the live link is up. " +
-                        "The car's Wi-Fi ADB (port 5555) must be on. Turns itself off after ${AdbBridge.ON_MINUTES} min.")
-                    .setPositiveButton("OK", null).show()
-            }
-            text = adbLabel()
-        }
+        link("Diagnostics \u2192 the Checks tab (bottom bar)") { select(TAB_DIAG) }
 
         col.addView(small("App"))
         var dlg: AlertDialog? = null
