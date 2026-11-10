@@ -53,7 +53,7 @@ object TpmsStore {
         }
         map = m
         // Decide the warning: a fast leak wins, else the lowest tyre under the limit.
-        val low = all().filter { it.psi in 0.1f until Prefs.tpmsLowPsi.toFloat() }.minByOrNull { it.psi }
+        val low = all().filter { it.psi >= 0.1f && it.psi < Prefs.tpmsLowPsi }.minByOrNull { it.psi }
         val newPos = leakPos ?: low?.pos
         val newLeak = leakPos != null
         val raise = newPos != null && (newPos != warnPos || newLeak != warnLeak)
