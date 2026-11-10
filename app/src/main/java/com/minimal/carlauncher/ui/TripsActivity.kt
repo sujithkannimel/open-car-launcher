@@ -43,6 +43,7 @@ class TripsActivity : AppCompatActivity() {
         const val TAB_BATTERY = "battery"
         const val TAB_PERF = "perf"
         const val TAB_CAMS = "cams"
+        const val TAB_TYRES = "tyres"
 
         private val BG = Neon.BG
         private val CARD = Neon.SURFACE
@@ -64,11 +65,12 @@ class TripsActivity : AppCompatActivity() {
     private lateinit var tabBattery: TextView
     private lateinit var tabPerf: TextView
     private lateinit var tabCams: TextView
+    private lateinit var tabTyres: TextView
     private var tab = TAB_FUEL
     private val handler = Handler(Looper.getMainLooper())
     private val ticker = object : Runnable {
         override fun run() {
-            if (tab == TAB_TRIPS || tab == TAB_BATTERY) render()
+            if (tab == TAB_TRIPS || tab == TAB_BATTERY || tab == TAB_TYRES) render()
             handler.postDelayed(this, 5_000L)
         }
     }
@@ -92,11 +94,13 @@ class TripsActivity : AppCompatActivity() {
         tabBattery = railButton("Battery") { select(TAB_BATTERY) }
         tabPerf = railButton("0-100") { select(TAB_PERF) }
         tabCams = railButton("Cameras") { select(TAB_CAMS) }
+        tabTyres = railButton("Tyres") { select(TAB_TYRES) }
         rail.addView(tabFuel, LinearLayout.LayoutParams(px(130), px(50)).apply { bottomMargin = px(8) })
         rail.addView(tabTrips, LinearLayout.LayoutParams(px(130), px(50)).apply { bottomMargin = px(8) })
         rail.addView(tabBattery, LinearLayout.LayoutParams(px(130), px(50)).apply { bottomMargin = px(8) })
         rail.addView(tabPerf, LinearLayout.LayoutParams(px(130), px(50)).apply { bottomMargin = px(8) })
-        rail.addView(tabCams, LinearLayout.LayoutParams(px(130), px(50)))
+        rail.addView(tabCams, LinearLayout.LayoutParams(px(130), px(50)).apply { bottomMargin = px(8) })
+        rail.addView(tabTyres, LinearLayout.LayoutParams(px(130), px(50)))
         rail.addView(View(this), LinearLayout.LayoutParams(1, 0, 1f))
         rail.addView(railButton("Close") { finish() }, LinearLayout.LayoutParams(px(130), px(48)))
         root.addView(rail, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT))
@@ -138,6 +142,7 @@ class TripsActivity : AppCompatActivity() {
         styleRail(tabBattery, t == TAB_BATTERY)
         styleRail(tabPerf, t == TAB_PERF)
         styleRail(tabCams, t == TAB_CAMS)
+        styleRail(tabTyres, t == TAB_TYRES)
         render()
     }
 
@@ -148,6 +153,7 @@ class TripsActivity : AppCompatActivity() {
             TAB_BATTERY -> renderBattery()
             TAB_PERF -> renderPerf()
             TAB_CAMS -> renderCams()
+            TAB_TYRES -> renderTyres()
             else -> renderTrips()
         }
     }
@@ -672,6 +678,45 @@ class TripsActivity : AppCompatActivity() {
             content.addView(body(String.format(Locale.US, "%s camera   %.5f, %.5f", c.kind.uppercase(Locale.US), c.lat, c.lon)))
             content.addView(buttonRow(listOf("Unmute" to { cs.unmute(c.id); render() })))
         }
+    }
+
+    // ================================================================== tyres
+
+    private fun renderTyres() {
+        content.addView(title("Tyre pressure"))
+        val tyres = com.minimal.carlauncher.core.TpmsStore.all()
+        if (tyres.isEmpty()) {
+            content.addView(body("No tyre readings yet."))
+            content.addView(hint("TREEL sensors are read by your phone and sent over the live link. Turn it on in " +
+                "Car Companion \u2192 Settings \u2192 \"Show tyre pressure on the car\", and assign each sensor to a wheel there. " +
+                "Drive a little to wake the sensors."))
+            return
+        }
+        val low = Prefs.tpmsLowPsi
+        fun colour(psi: Float) = when { psi < low -> RED; psi < low + 2 -> AMBER; else -> GREEN }
+        fun stat(pos: String): Stat {
+            val t = com.minimal.carlauncher.core.TpmsStore.tyre(pos)
+            val name = com.minimal.carlauncher.core.Tpms.posLabel(pos).uppercase(Locale.US)
+            if (t == null) return Stat("--", "$name \u00B7 NO SIGNAL", TEXT)
+            val extra = (if (t.tempC >= 0) " \u00B7 ${t.tempC.toInt()}\u00B0C" else "") + (if (t.batt in 1..100) " \u00B7 ${t.batt}%" else "")
+            return Stat(String.format(Locale.US, "%.0f psi", t.psi), "$name$extra", colour(t.psi))
+        }
+        content.addView(statRow(listOf(stat(com.minimal.carlauncher.core.Tpms.FL), stat(com.minimal.carlauncher.core.Tpms.FR))))
+        content.addView(statRow(listOf(stat(com.minimal.carlauncher.core.Tpms.RL), stat(com.minimal.carlauncher.core.Tpms.RR))))
+
+        val warn = com.minimal.carlauncher.core.TpmsStore.warnPos
+        if (warn != null) content.addView(body("\u26A0 " + com.minimal.carlauncher.core.Tpms.posLabel(warn) +
+            (if (com.minimal.carlauncher.core.TpmsStore.warnLeak) " is losing pressure fast." else " is low.")))
+
+        content.addView(section("Warn below"))
+        content.addView(buttonRow(listOf(
+            "24 psi" to { Prefs.tpmsLowPsi = 24; render() },
+            "26 psi" to { Prefs.tpmsLowPsi = 26; render() },
+            "28 psi" to { Prefs.tpmsLowPsi = 28; render() },
+            "30 psi" to { Prefs.tpmsLowPsi = 30; render() },
+        )))
+        content.addView(hint("Below the chosen pressure, or a fast drop (about 4 psi), the car speaks a warning and flashes. " +
+            "Current limit: $low psi. Assign or reassign sensors to wheels in Car Companion."))
     }
 
     // ================================================================== performance

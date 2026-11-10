@@ -167,11 +167,13 @@ object CarLink {
     /** [gps]: the phone can share its GPS while the car has no fix (setting on, permission granted). */
     /** [setStay]: change the car's "stay on current screen" setting: 1 on, 0 off, -1 leave it. */
     data class PhoneMsg(val fills: List<InboxFill>, val offer: Offer?, val np: NowPlaying? = null, val adb: Boolean = false,
-                        val cams: String? = null, val gps: Boolean = false, val setStay: Int = -1)
+                        val cams: String? = null, val gps: Boolean = false, val setStay: Int = -1,
+                        /** Tyre readings from the phone's TPMS scan (encoded list), or null. */
+                        val tyres: String? = null)
 
     /** Phone -> car: fill-ups the car hasn't acknowledged yet, an update if the phone has one, what plays. */
     fun phoneMessage(fills: List<InboxFill>, now: Long, offer: Offer? = null, np: NowPlaying? = null, adb: Boolean = false,
-                     cams: String? = null, gps: Boolean = false, setStay: Int = -1): String = JSONObject()
+                     cams: String? = null, gps: Boolean = false, setStay: Int = -1, tyres: String? = null): String = JSONObject()
         .put("k", "phone").put("t", now)
         .put("fills", JSONArray(fills.map { JSONObject(it.toJson()) }))
         .put("offer", offer?.let { JSONObject().put("ver", it.version).put("size", it.size).put("sha", it.sha256) } ?: JSONObject.NULL)
@@ -180,6 +182,7 @@ object CarLink {
         .put("cams", cams ?: JSONObject.NULL)
         .put("gps", gps)
         .put("ss", setStay)
+        .put("tyres", tyres ?: JSONObject.NULL)
         .toString()
 
     fun parsePhone(text: String, now: Long): PhoneMsg? = try {
@@ -193,6 +196,7 @@ object CarLink {
             if (o.isNull("cams")) null else o.optString("cams").ifEmpty { null },
             o.optBoolean("gps", false),
             o.optInt("ss", -1),
+            if (o.isNull("tyres")) null else o.optString("tyres").ifEmpty { null },
         )
     } catch (_: Exception) {
         null

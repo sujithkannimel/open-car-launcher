@@ -4,6 +4,7 @@ import android.app.Activity
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.app.AlertDialog
+import android.widget.Button
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -45,6 +46,7 @@ class MainActivity : Activity() {
 
     companion object {
         private const val REQ_GPS = 41
+        private const val REQ_BT = 42
         // Graphite + neon, the same palette as the head unit.
         private val BG = Neon.BG
         private val CARD = Neon.SURFACE
@@ -813,6 +815,17 @@ class MainActivity : Activity() {
         col.addView(small(if (LinkStore.key(this) == null) "Waiting for the car to share its link key (needs the car online once)."
             else "Ready. The car sends data straight to this phone on home Wi-Fi and during Android Auto."))
 
+        col.addView(android.widget.CheckBox(this).apply {
+            text = "Show tyre pressure on the car (TREEL sensors)"
+            isChecked = TpmsScanner.enabled(this@MainActivity)
+            setTextColor(TEXT)
+            setOnCheckedChangeListener { _, on ->
+                TpmsScanner.setEnabled(this@MainActivity, on)
+                if (on) askBtPermission()
+            }
+        })
+        link("Tyres: assign sensors to wheels") { tyresDialog() }
+
         col.addView(small("Car"))
         fun camLabel(): String {
             val set = CameraUpdater.set(this@MainActivity)
@@ -1053,6 +1066,11 @@ class MainActivity : Activity() {
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQ_BT) {
+            if (TpmsScanner.hasScanPermission(this)) { LinkService.start(this); Toast.makeText(this, "Tyre sensors will show on the car", Toast.LENGTH_SHORT).show() }
+            else Toast.makeText(this, "Bluetooth scan not allowed - tyre pressure won't work", Toast.LENGTH_LONG).show()
+            return
+        }
         if (requestCode == REQ_GPS && GpsShare.enabled(this)) {
             val askedBackground = permissions.contains(android.Manifest.permission.ACCESS_BACKGROUND_LOCATION)
             if (askedBackground && !GpsShare.hasBackground(this))
@@ -1060,6 +1078,50 @@ class MainActivity : Activity() {
             else if (GpsShare.hasFine(this)) askGpsPermission()
             else Toast.makeText(this, "Location not allowed - the car will wait for its own GPS", Toast.LENGTH_LONG).show()
         }
+    }
+
+    private fun askBtPermission() {
+        if (TpmsScanner.hasScanPermission(this)) {
+            LinkService.start(this); return
+        }
+        if (Build.VERSION.SDK_INT >= 31)
+            requestPermissions(arrayOf(android.Manifest.permission.BLUETOOTH_SCAN), REQ_BT)
+        else requestPermissions(arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION), REQ_BT)
+    }
+
+    private fun tyresDialog() {
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(px(20), px(12), px(20), px(12)) }
+        val macs = TpmsScanner.seenMacs()
+        if (macs.isEmpty()) {
+            col.addView(small("No sensors heard yet. Turn the setting on, make sure the car link is up, and drive a little to wake the sensors - then reopen this."))
+        } else {
+            col.addView(small("Tap a wheel to assign each sensor. Pressure shown is live."))
+            for (mac in macs) {
+                val reading = TpmsScanner.lastReading(mac)
+                val head = TextView(this).apply {
+                    text = mac.uppercase() + (reading?.let { "   ${it.psi.toInt()} psi  ${it.tempC.toInt()}°C" } ?: "")
+                    setTextColor(TEXT); setPadding(0, px(10), 0, px(2))
+                }
+                col.addView(head)
+                val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+                for (pos in com.minimal.carlauncher.core.Tpms.POSITIONS) {
+                    val on = TpmsScanner.positionOf(this@MainActivity, mac) == pos
+                    row.addView(Button(this).apply {
+                        text = pos; isAllCaps = false
+                        if (on) setTextColor(CYAN)
+                        setOnClickListener {
+                            TpmsScanner.setPosition(this@MainActivity, mac, if (on) null else pos)
+                            Toast.makeText(this@MainActivity, if (on) "Cleared" else "${mac.takeLast(5)} = ${com.minimal.carlauncher.core.Tpms.posLabel(pos)}", Toast.LENGTH_SHORT).show()
+                        }
+                    }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                }
+                col.addView(row)
+            }
+        }
+        AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle("Tyre sensors")
+            .setView(android.widget.ScrollView(this).apply { addView(col) })
+            .setPositiveButton("Done", null).show()
     }
 
     private fun small(t: String) = TextView(this).apply {

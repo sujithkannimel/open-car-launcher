@@ -100,6 +100,9 @@ internal class CameraWatch(private val context: Context) {
     private fun inWords(a: CameraAhead, m: Double) = name(a) + (if (a.cam.limit > 0) ", limit ${a.cam.limit}," else "") +
         " in " + CameraVoice.distanceWords(m) + then()
 
+    /** Speak an arbitrary alert (tyres), reusing the camera voice engine. */
+    fun speak(text: String, beeps: Int = 2) = voice.alert(text, beeps)
+
     fun release() { if (voiceLazy.isInitialized()) voice.release() }
 
     private fun log(msg: String) = PanelService.log(context, msg)

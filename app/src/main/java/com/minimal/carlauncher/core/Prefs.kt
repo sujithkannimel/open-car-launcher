@@ -80,6 +80,7 @@ object Prefs {
     const val KEY_CAM_CHIME = "pref_cam_chime"
     const val KEY_CAM_ALERT = "pref_cam_alert"
     const val KEY_CAM_RANGE = "pref_cam_range"
+    const val KEY_TPMS_LOW = "pref_tpms_low"
     const val KEY_WEATHER_JSON = "pref_weather_json"
     const val KEY_STAY_ON_CONNECT = "pref_stay_on_connect"
     const val KEY_USER_OPENED_ZLINK = "pref_user_opened_zlink_at"
@@ -487,6 +488,11 @@ object Prefs {
     var camRangeM: Int
         get() = sp.getInt(KEY_CAM_RANGE, 1000)
         set(value) = sp.edit().putInt(KEY_CAM_RANGE, value).apply()
+
+    /** Warn below this tyre pressure (psi). */
+    var tpmsLowPsi: Int
+        get() = sp.getInt(KEY_TPMS_LOW, 26)
+        set(value) = sp.edit().putInt(KEY_TPMS_LOW, value).apply()
 
     /** Timed acceleration runs (0-60, 0-100, 40-80), newest last. */
     var perfRuns: List<PerfRun>

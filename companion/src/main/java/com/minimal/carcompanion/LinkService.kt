@@ -56,6 +56,7 @@ class LinkService : Service() {
     override fun onCreate() {
         super.onCreate()
         startForegroundNow(getString(R.string.link_waiting))
+        TpmsScanner.attach(this)
         Thread({ serve() }, "car-link").start()
         main.postDelayed(summaryCheck, 60_000L)
     }
@@ -115,6 +116,7 @@ class LinkService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
 
     override fun onDestroy() {
+        TpmsScanner.stop()
         main.removeCallbacks(tripEnd)
         main.removeCallbacks(summaryCheck)
         runCatching { server?.close() }
@@ -204,11 +206,14 @@ class LinkService : Service() {
                 msg.extra.cmd?.let { PhoneMedia.run(this, it) }
                 val np = if (LinkStore.mediaOn(this)) PhoneMedia.nowPlaying(this, msg.extra.npArtKey) else null
                 val cams = camerasFor(msg.extra.camVer, now)
+                // Tyre readings from the BLE scan (null when off / none heard).
+                if (TpmsScanner.canScan(this)) TpmsScanner.start(this) else TpmsScanner.stop()
+                val tyres = TpmsScanner.tyresFor(this).takeIf { it.isNotEmpty() }?.let { com.minimal.carlauncher.core.Tpms.encode(it) }
                 // "Stay on current screen" changed here: send it until the car reports the new value.
                 LinkStore.setCarStay(this, msg.extra.stay)
                 val want = LinkStore.wantStay(this).let { w -> if (w != -1 && w == msg.extra.stay) { LinkStore.setWantStay(this, -1); -1 } else w }
                 val reply = CarLink.seal(key, CarLink.phoneMessage(LinkStore.localFills(this), now, offer, np, AdbBridge.isOn(now), cams,
-                    GpsShare.canShare(this), want))
+                    GpsShare.canShare(this), want, tyres))
                 s.getOutputStream().apply { write((reply + "\n").toByteArray()); flush() }
                 LinkStore.saveLive(this, msg, s.inetAddress?.hostAddress.orEmpty())
                 main.post {
@@ -272,6 +277,7 @@ class LinkService : Service() {
     }
 
     private fun onCarQuiet() {
+        TpmsScanner.stop()                              // car's off: no need to keep scanning
         val trip = LinkStore.lastLiveTrip(this) ?: return
         if (trip.isParked && trip.idleSec < TripLog.PARKED_MIN_IDLE_SEC) return
         if (!TripLog.worthKeeping(trip)) return

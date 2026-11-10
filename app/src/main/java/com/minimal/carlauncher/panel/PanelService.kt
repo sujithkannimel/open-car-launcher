@@ -1467,6 +1467,7 @@ class PanelService : Service() {
             if (up != linkWasUp) { linkWasUp = up; log(if (up) "live link: phone at ${r.reached}" else "live link: phone not reachable") }
             r.note?.let { log("live link: $it") }
             if (r.added > 0) handler.post { onPhoneFillsAdded() }
+            r.tyreWarn?.let { pos -> handler.post { onTyreWarn(pos, r.tyreLeak) } }
             r.update?.let { (tag, file) ->
                 log("live link: launcher $tag received from the phone")
                 handler.post {
@@ -1475,6 +1476,17 @@ class PanelService : Service() {
                 }
             }
         }
+    }
+
+    /** A tyre dropped below the limit (or is leaking fast): speak it and flash the strip red. */
+    private fun onTyreWarn(pos: String, leak: Boolean) {
+        val t = com.minimal.carlauncher.core.TpmsStore.tyre(pos)
+        val name = com.minimal.carlauncher.core.Tpms.posLabel(pos).lowercase(java.util.Locale.US)
+        val psi = t?.psi?.let { " ${it.toInt()} PSI" } ?: ""
+        cameras.speak(if (leak) "Warning, $name tyre losing pressure fast,$psi" else "Low pressure, $name tyre,$psi", 3)
+        log("tyre warning: $pos ${if (leak) "fast leak" else "low"} ${t?.psi ?: -1} psi")
+        if (ZlinkGuard.topApp(this) != packageName) { stripGlow(Neon.RED); flashStrip() }
+        updateCamSlot()
     }
 
     /** Fill-ups logged on the phone were merged: refresh the fuel chip and say so. */

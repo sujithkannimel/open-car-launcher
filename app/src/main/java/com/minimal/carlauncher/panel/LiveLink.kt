@@ -34,7 +34,8 @@ object LiveLink {
     private val acked = ArrayList<String>()
 
     /** [update]: a launcher APK received from the phone (tag to file), ready to install. */
-    class Result(val reached: String?, val added: Int, val update: Pair<String, File>? = null, val note: String? = null)
+    class Result(val reached: String?, val added: Int, val update: Pair<String, File>? = null, val note: String? = null,
+                 val tyreWarn: String? = null, val tyreLeak: Boolean = false)
 
     /** Runs one exchange on a background thread; [done] is called on that thread. */
     fun tick(context: Context, extra: () -> CarLink.CarExtra, done: (Result) -> Unit) {
@@ -78,6 +79,12 @@ object LiveLink {
         synchronized(acked) { acked.removeAll(ack.toSet()) }
         com.minimal.carlauncher.core.PhoneMedia.onReply(got.np, cmd)
 
+        var tyreWarn: String? = null; var tyreLeak = false
+        got.tyres?.let { json ->
+            tyreWarn = com.minimal.carlauncher.core.TpmsStore.update(com.minimal.carlauncher.core.Tpms.decodeList(json))
+            tyreLeak = com.minimal.carlauncher.core.TpmsStore.warnLeak
+        }
+
         var added = 0
         if (got.fills.isNotEmpty()) {
             val res = FuelInbox.merge(Prefs.fuelEvents, got.fills, Prefs.gpsOdoKm)
@@ -98,7 +105,7 @@ object LiveLink {
         val update = got.offer?.let { o ->
             fetchUpdate(context, ip, key, o) { note = it }
         }
-        return Result(ip, added, update, note)
+        return Result(ip, added, update, note, tyreWarn, tyreLeak)
     }
 
     /**
