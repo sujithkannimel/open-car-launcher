@@ -23,7 +23,7 @@ object AdbTunnel {
     @Volatile private var phoneIp = ""
     @Volatile private var key = ""
     private val waiting = AtomicInteger(0)
-    @Volatile private var triedRoot = false
+    @Volatile private var lastRootTry = 0L
 
     /** Log sink (the panel's log). */
     @Volatile var log: ((String) -> Unit)? = null
@@ -75,14 +75,21 @@ object AdbTunnel {
         } catch (_: Exception) { null }
         tryOnce()?.let { return it }
         // Rooted unit: ask adbd to listen on TCP once (a root prompt may appear the first time).
-        if (!triedRoot) {
-            triedRoot = true
+        // At most every 5 minutes; the persist property keeps it on across restarts and updates.
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - lastRootTry > 5 * 60_000L || lastRootTry == 0L) {
+            lastRootTry = now
             try {
-                Runtime.getRuntime().exec(arrayOf("su", "-c", "setprop service.adb.tcp.port $ADBD_PORT; stop adbd; start adbd"))
-                    .waitFor()
-                log?.invoke("adb bridge: asked adbd to listen on TCP $ADBD_PORT")
-                Thread.sleep(2_000)
-            } catch (_: Exception) {}
+                val p = Runtime.getRuntime().exec(arrayOf("su", "-c",
+                    "setprop persist.adb.tcp.port $ADBD_PORT; setprop service.adb.tcp.port $ADBD_PORT; stop adbd; start adbd"))
+                val done = p.waitFor(20, java.util.concurrent.TimeUnit.SECONDS)
+                val err = runCatching { p.errorStream.bufferedReader().readText().trim().take(120) }.getOrDefault("")
+                log?.invoke("adb bridge: root request to turn on network ADB - " +
+                    (if (!done) "no answer (root prompt on the screen?)" else "exit ${p.exitValue()}${if (err.isNotEmpty()) ": $err" else ""}"))
+                Thread.sleep(2_500)
+            } catch (e: Exception) {
+                log?.invoke("adb bridge: root not available ($e)")
+            }
             return tryOnce()
         }
         return null

@@ -71,6 +71,10 @@ object LiveLink {
         val ip = reached ?: return Result(null, 0)
         AdbTunnel.update(got.adb, ip, key)
         com.minimal.carlauncher.core.PhoneGps.onLink(got.gps, ip, key)
+        if (got.setStay in 0..1 && (got.setStay == 1) != Prefs.stayOnConnect) {
+            Prefs.stayOnConnect = got.setStay == 1
+            log("stay on current screen when phone connects: ${if (got.setStay == 1) "on" else "off"} (set from the phone)")
+        }
         synchronized(acked) { acked.removeAll(ack.toSet()) }
         com.minimal.carlauncher.core.PhoneMedia.onReply(got.np, cmd)
 

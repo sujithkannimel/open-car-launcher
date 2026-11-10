@@ -1482,6 +1482,7 @@ class PanelService : Service() {
             appVersion = com.minimal.carlauncher.BuildConfig.VERSION_NAME,
             chargeAlert = chargeAlert,
             camVer = com.minimal.carlauncher.core.CameraStore.osmSet(this).version,
+            stay = if (Prefs.stayOnConnect) 1 else 0,
             pos = fix?.let { com.minimal.carlauncher.core.CarLink.Pos(it.latitude, it.longitude, it.time, if (it.hasSpeed()) it.speed else 0f) },
             diag = diag,
         )

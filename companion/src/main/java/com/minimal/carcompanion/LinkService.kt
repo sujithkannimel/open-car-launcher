@@ -204,7 +204,11 @@ class LinkService : Service() {
                 msg.extra.cmd?.let { PhoneMedia.run(this, it) }
                 val np = if (LinkStore.mediaOn(this)) PhoneMedia.nowPlaying(this, msg.extra.npArtKey) else null
                 val cams = camerasFor(msg.extra.camVer, now)
-                val reply = CarLink.seal(key, CarLink.phoneMessage(LinkStore.localFills(this), now, offer, np, AdbBridge.isOn(now), cams, GpsShare.canShare(this)))
+                // "Stay on current screen" changed here: send it until the car reports the new value.
+                LinkStore.setCarStay(this, msg.extra.stay)
+                val want = LinkStore.wantStay(this).let { w -> if (w != -1 && w == msg.extra.stay) { LinkStore.setWantStay(this, -1); -1 } else w }
+                val reply = CarLink.seal(key, CarLink.phoneMessage(LinkStore.localFills(this), now, offer, np, AdbBridge.isOn(now), cams,
+                    GpsShare.canShare(this), want))
                 s.getOutputStream().apply { write((reply + "\n").toByteArray()); flush() }
                 LinkStore.saveLive(this, msg, s.inetAddress?.hostAddress.orEmpty())
                 main.post {
@@ -399,6 +403,12 @@ object LinkStore {
     fun mediaOn(c: Context) = sp(c).getBoolean("mediaOn", true)
     fun setMediaOn(c: Context, on: Boolean) = sp(c).edit().putBoolean("mediaOn", on).apply()
     fun carVersion(c: Context): String = sp(c).getString("carVersion", "") ?: ""
+    /** The car's "stay on current screen when phone connects": 1 / 0, -1 not reported yet. */
+    fun carStay(c: Context) = sp(c).getInt("carStay", -1)
+    fun setCarStay(c: Context, v: Int) = sp(c).edit().putInt("carStay", v).apply()
+    /** A change made on the phone, waiting for the car to take it (-1 none). */
+    fun wantStay(c: Context) = sp(c).getInt("wantStay", -1)
+    fun setWantStay(c: Context, v: Int) = sp(c).edit().putInt("wantStay", v).apply()
     fun diag(c: Context): String = sp(c).getString("diag", "") ?: ""
     /** The car's own data as it last sent it (its backup JSON: no tokens or keys). */
     fun cachedJson(c: Context): String? = sp(c).getString("cache", null)?.takeIf { it.isNotBlank() }

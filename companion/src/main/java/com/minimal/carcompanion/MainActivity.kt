@@ -789,6 +789,19 @@ class MainActivity : Activity() {
             setOnCheckedChangeListener { _, on -> LinkStore.setMediaOn(this@MainActivity, on) }
         })
         col.addView(android.widget.CheckBox(this).apply {
+            val want = LinkStore.wantStay(this@MainActivity)
+            val car = LinkStore.carStay(this@MainActivity)
+            text = "Car keeps its own screen when the phone connects (untick to let Android Auto come to the front)" +
+                when { want != -1 -> " - sending to the car…"; car == -1 -> " - connect to the car first"; else -> "" }
+            isChecked = if (want != -1) want == 1 else car != 0
+            isEnabled = car != -1 || want != -1
+            setTextColor(TEXT)
+            setOnCheckedChangeListener { _, on ->
+                LinkStore.setWantStay(this@MainActivity, if (on) 1 else 0)
+                Toast.makeText(this@MainActivity, "Sent with the next link check (within a minute)", Toast.LENGTH_SHORT).show()
+            }
+        })
+        col.addView(android.widget.CheckBox(this).apply {
             text = "Lend the phone's GPS to the car until it finds its own"
             isChecked = GpsShare.enabled(this@MainActivity) && GpsShare.hasFine(this@MainActivity)
             setTextColor(TEXT)

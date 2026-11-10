@@ -94,6 +94,12 @@ class CarLinkTest {
         assertEquals(false, CarLink.isTunnelRequest(CarLink.apkRequest("0.4", now), now))
     }
 
+    @Test fun staySettingTravels() {
+        val now = 1_800_000_000_000L
+        assertEquals(0, CarLink.parsePhone(CarLink.phoneMessage(emptyList(), now, setStay = 0), now)!!.setStay)
+        assertEquals(-1, CarLink.parsePhone(CarLink.phoneMessage(emptyList(), now), now)!!.setStay)
+    }
+
     @Test fun phoneGpsStream() {
         val now = 1_800_000_000_000L
         assertEquals(true, CarLink.parsePhone(CarLink.phoneMessage(emptyList(), now, gps = true), now)!!.gps)
