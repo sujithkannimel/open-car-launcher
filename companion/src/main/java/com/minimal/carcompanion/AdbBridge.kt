@@ -21,6 +21,7 @@ import java.util.concurrent.TimeUnit
  * [ON_MINUTES], and adbd on the car still checks Termux's ADB key.
  */
 object AdbBridge {
+    @Volatile private var lastNoCarNote = 0L
 
     const val PORT = 5556
     const val ON_MINUTES = 30
@@ -89,7 +90,12 @@ object AdbBridge {
             pipe(client, car)
             return
         }
-        LinkStore.note(c, "ADB bridge: car not connected - is the car on and the live link up?")
+        // adb retries many times a second: once a minute is enough.
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - lastNoCarNote > 60_000L) {
+            lastNoCarNote = now
+            LinkStore.note(c, "ADB bridge: car not connected - is the car on and the live link up?")
+        }
         runCatching { client.close() }
     }
 

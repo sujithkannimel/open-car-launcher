@@ -30,6 +30,8 @@ object PhoneGps {
     @Volatile private var key = ""
 
     @Volatile private var socket: Socket? = null
+    /** After a stream that brought nothing (phone not reachable), wait a minute before trying again. */
+    @Volatile private var retryAfter = 0L
     val streaming: Boolean get() = socket != null
 
     fun ownFresh(now: Long = SystemClock.elapsedRealtime()) = ownFixAt > 0L && now - ownFixAt < 5_000L
@@ -47,6 +49,7 @@ object PhoneGps {
     /** Opens the stream (on its own thread) unless already open; each fix goes to [onFix] on that thread. */
     fun start(onFix: (Location) -> Unit, log: (String) -> Unit) {
         if (socket != null || !available || ip.isEmpty()) return
+        if (SystemClock.elapsedRealtime() < retryAfter) return
         val s = Socket()
         socket = s
         Thread {
@@ -74,7 +77,8 @@ object PhoneGps {
             } finally {
                 runCatching { s.close() }
                 if (socket === s) socket = null
-                log("phone gps: stopped after $n fixes")
+                if (n == 0) retryAfter = SystemClock.elapsedRealtime() + 60_000L
+                else log("phone gps: stopped after $n fixes")
             }
         }.start()
     }
