@@ -93,6 +93,9 @@ class PanelService : Service() {
     private var batteryBadgeView: View? = null
     private var battLabelView: TextView? = null
     private var tripView: TextView? = null
+    /** The strip's 2x2 tyre-pressure block: FL FR / RL RR. */
+    private var tyreCells: Array<TextView>? = null
+    private var tyreBlock: View? = null
     /** The strip's neon top line: flashes amber / red for a camera while another app is in front. */
     private var stripLine: View? = null
     private var pulseAnim: android.animation.ObjectAnimator? = null
@@ -131,6 +134,7 @@ class PanelService : Service() {
         TripTracker(this, { volts.engineMaybeRunning() }, { handler.post { liveLinkTick() } }) { cameras.onFix(it); updateCamSlot() }
     }
     private val cameras by lazy { CameraWatch(this) }
+    private val tyreChanged: () -> Unit = { handler.post { updateTyreStrip() } }
     private var flashSeen = 0
     private val cameraChanged: () -> Unit = {
         updateBatteryDisplay()
@@ -229,6 +233,7 @@ class PanelService : Service() {
         com.minimal.carlauncher.core.PhoneMedia.addListener(playSync)
         com.minimal.carlauncher.core.CameraStore.removeListener(cameraChanged)
         com.minimal.carlauncher.core.CameraStore.addListener(cameraChanged)
+        com.minimal.carlauncher.core.TpmsStore.addListener(tyreChanged)
         handler.removeCallbacks(phoneGpsCheck)
         handler.postDelayed(phoneGpsCheck, 5_000L)
         keepAdbOn()
@@ -290,6 +295,7 @@ class PanelService : Service() {
         battery.stop()
         trips.stop()
         com.minimal.carlauncher.core.CameraStore.removeListener(cameraChanged)
+        com.minimal.carlauncher.core.TpmsStore.removeListener(tyreChanged)
         handler.removeCallbacks(phoneGpsCheck)
         com.minimal.carlauncher.core.PhoneGps.stop()
         cameras.release()
@@ -374,7 +380,7 @@ class PanelService : Service() {
 
         // 3. LOWER LEFT: Battery Voltage Pill Badge
         val leftCluster = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
+            orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.START or Gravity.CENTER_VERTICAL
             setPadding(px(6f), px(10f), px(10f), px(10f))
             // Let the pill's neon halo spill outside its bounds.
@@ -463,8 +469,15 @@ class PanelService : Service() {
             weatherIcon = wIcon
             weatherTemp = wTemp
         }
-        leftCluster.addView(batteryBadge, LinearLayout.LayoutParams(W, W))
-        leftCluster.addView(subRow, LinearLayout.LayoutParams(W, W))
+        val battCol = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.START or Gravity.CENTER_VERTICAL
+            clipChildren = false; clipToPadding = false
+        }
+        battCol.addView(batteryBadge, LinearLayout.LayoutParams(W, W))
+        battCol.addView(subRow, LinearLayout.LayoutParams(W, W))
+        leftCluster.addView(battCol, LinearLayout.LayoutParams(W, W))
+        leftCluster.addView(buildTyreStrip(), LinearLayout.LayoutParams(W, W).apply { leftMargin = px(14f) })
         batteryBadgeView = batteryBadge
         battLabelView = battSubtitle
         tripView = trip
@@ -1036,6 +1049,7 @@ class PanelService : Service() {
             batteryDisplay?.text = "$icon $volt"
             tripView?.apply { text = trips.tripText(); setTextColor(Neon.TEXT_2) }
             updateCamSlot()
+            updateTyreStrip()
         }
     }
 
@@ -1078,6 +1092,72 @@ class PanelService : Service() {
             addView(tile, LinearLayout.LayoutParams(W, px(64f)))
             addView(caption, LinearLayout.LayoutParams(W, W).apply { topMargin = px(6f) })
             addView(View(context), LinearLayout.LayoutParams(px(44f), px(6f)).apply { topMargin = px(2f) })
+        }
+    }
+
+    /** A compact 2x2 tyre-pressure block (FL FR / RL RR) for the strip, coloured by pressure. */
+    private fun buildTyreStrip(): View {
+        val cells = Array(4) {
+            TextView(this).apply {
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+                typeface = Typeface.MONOSPACE
+                setTypeface(typeface, Typeface.BOLD)
+                gravity = Gravity.CENTER
+                includeFontPadding = false
+                minWidth = px(30f)
+                setPadding(px(3f), px(1f), px(3f), px(1f))
+            }
+        }
+        fun row(a: Int, b: Int) = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            addView(cells[a]); addView(cells[b])
+        }
+        val caption = TextView(this).apply {
+            text = "TYRES"
+            setTextColor(Neon.DIM)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 9f)
+            letterSpacing = 0.1f
+            gravity = Gravity.CENTER
+            includeFontPadding = false
+        }
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            background = GradientDrawable().apply { cornerRadius = px(12f).toFloat(); setColor(Neon.alpha(Color.WHITE, 10)) }
+            setPadding(px(10f), px(4f), px(10f), px(5f))
+            addView(caption)
+            addView(row(0, 1))
+            addView(row(2, 3))
+        }
+        col.isClickable = true
+        col.setOnClickListener { openTrips("tyres") }
+        tyreCells = cells
+        tyreBlock = col
+        updateTyreStrip()
+        return col
+    }
+
+    private fun updateTyreStrip() {
+        val cells = tyreCells ?: return
+        val block = tyreBlock ?: return
+        val store = com.minimal.carlauncher.core.TpmsStore
+        if (!store.any()) { block.visibility = View.GONE; return }
+        block.visibility = View.VISIBLE
+        val low = Prefs.tpmsLowPsi
+        val pos = arrayOf(com.minimal.carlauncher.core.Tpms.FL, com.minimal.carlauncher.core.Tpms.FR,
+            com.minimal.carlauncher.core.Tpms.RL, com.minimal.carlauncher.core.Tpms.RR)
+        for (i in 0..3) {
+            val t = store.tyre(pos[i])
+            if (t == null) { cells[i].text = "--"; cells[i].setTextColor(Neon.DIM) }
+            else {
+                cells[i].text = t.psi.roundToInt().toString()
+                cells[i].setTextColor(when {
+                    t.psi < low -> Neon.RED
+                    t.psi < low + 2 -> Neon.AMBER
+                    else -> Color.rgb(74, 222, 128)
+                })
+            }
         }
     }
 
@@ -1738,6 +1818,7 @@ class PanelService : Service() {
         batteryBadgeView = null
         battLabelView = null
         tripView = null
+        tyreCells = null; tyreBlock = null
         camSlotPulse?.cancel(); camSlotPulse = null
         camSlotTile = null; camSlotBig = null; camSlotCaption = null
         stripLine = null
