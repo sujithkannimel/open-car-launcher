@@ -24,6 +24,7 @@ object AdbTunnel {
     @Volatile private var key = ""
     private val waiting = AtomicInteger(0)
     @Volatile private var lastRootTry = 0L
+    @Volatile private var lastNoAdbdLog = 0L
 
     /** Log sink (the panel's log). */
     @Volatile var log: ((String) -> Unit)? = null
@@ -55,7 +56,13 @@ object AdbTunnel {
             if (go != CarLink.TUNNEL_GO) { phone.close(); return }   // dropped by the phone: wait for the next exchange
             topUp()                                               // keep a spare ready for adb's next connection
             val adbd = connectAdbd() ?: run {
-                log?.invoke("adb bridge: adbd isn't listening on port $ADBD_PORT - turn on Wi-Fi ADB on the head unit")
+                // adb retries many times a second: say it once a minute, not 60 lines that push
+                // everything else out of the log.
+                val now = android.os.SystemClock.elapsedRealtime()
+                if (now - lastNoAdbdLog > 60_000L) {
+                    lastNoAdbdLog = now
+                    log?.invoke("adb bridge: adbd isn't listening on port $ADBD_PORT - turn on USB debugging on the head unit")
+                }
                 phone.close(); return
             }
             pipe(phone, adbd)
