@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- Updater, map tiles and address search. The clock, radio, speedometer, docks and any
          already-cached map area keep working with zero connectivity. -->
@@ -22,6 +23,10 @@
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Granted once over ADB (pm grant): lets the launcher switch USB debugging back on when
+         the head unit resets it, so the phone's ADB bridge keeps working. -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
 
     <!-- Restore: read backup files in Download/CarLauncher written by an earlier install or
          copied in over ADB. Asked for only when the driver taps Restore. -->

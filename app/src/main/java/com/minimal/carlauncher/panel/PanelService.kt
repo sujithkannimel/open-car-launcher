@@ -231,6 +231,7 @@ class PanelService : Service() {
         com.minimal.carlauncher.core.CameraStore.addListener(cameraChanged)
         handler.removeCallbacks(phoneGpsCheck)
         handler.postDelayed(phoneGpsCheck, 5_000L)
+        keepAdbOn()
         lastHeartbeatMs = 0L
         tripHeartbeat()
         trips.start()
@@ -1199,6 +1200,25 @@ class PanelService : Service() {
             duration = 2_400L
             start()
         }
+    }
+
+    /**
+     * The head unit switches USB debugging off on some restarts, which kills the phone's ADB
+     * bridge. With WRITE_SECURE_SETTINGS (granted once: adb shell pm grant <pkg>
+     * android.permission.WRITE_SECURE_SETTINGS) it is switched straight back on.
+     */
+    private fun keepAdbOn() {
+        val cr = contentResolver
+        val on = try { android.provider.Settings.Global.getInt(cr, android.provider.Settings.Global.ADB_ENABLED, 0) == 1 } catch (_: Exception) { true }
+        if (on) return
+        if (checkSelfPermission("android.permission.WRITE_SECURE_SETTINGS") != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            log("usb debugging is off (ADB bridge won't work) - turn it on in Developer options")
+            return
+        }
+        try {
+            android.provider.Settings.Global.putInt(cr, android.provider.Settings.Global.ADB_ENABLED, 1)
+            log("usb debugging was off - switched it back on")
+        } catch (e: Exception) { log("usb debugging: could not switch on ($e)") }
     }
 
     private fun currentVolts(): Float? = volts.display().removeSuffix("V").toFloatOrNull()
