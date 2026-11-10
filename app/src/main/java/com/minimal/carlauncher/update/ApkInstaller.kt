@@ -79,8 +79,8 @@ object ApkInstaller {
         if (!apk.exists()) return "file gone"
         val tmp = "/data/local/tmp/car-launcher-upd.apk"
         return try {
-            val script = "cp '${apk.absolutePath}' $tmp && chmod 644 $tmp && " +
-                "pm install -r -d $tmp; RC=$?; rm -f $tmp; exit $RC"
+            // No shell $vars here - Kotlin would parse them. $tmp/$apk are Kotlin interpolations.
+            val script = "cp '${apk.absolutePath}' $tmp && chmod 644 $tmp && pm install -r -d $tmp && rm -f $tmp"
             val p = Runtime.getRuntime().exec(arrayOf("su", "-c", script))
             val out = p.inputStream.bufferedReader().readText()
             val err = p.errorStream.bufferedReader().readText()
