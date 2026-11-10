@@ -35,7 +35,7 @@ object LiveLink {
 
     /** [update]: a launcher APK received from the phone (tag to file), ready to install. */
     class Result(val reached: String?, val added: Int, val update: Pair<String, File>? = null, val note: String? = null,
-                 val tyreWarn: String? = null, val tyreLeak: Boolean = false)
+                 val tyreWarn: String? = null, val tyreLeak: Boolean = false, val installVer: String? = null)
 
     /** Runs one exchange on a background thread; [done] is called on that thread. */
     fun tick(context: Context, extra: () -> CarLink.CarExtra, done: (Result) -> Unit) {
@@ -80,6 +80,7 @@ object LiveLink {
         com.minimal.carlauncher.core.PhoneMedia.onReply(got.np, cmd)
 
         var tyreWarn: String? = null; var tyreLeak = false
+        val installVer = got.installVer
         got.tyres?.let { json ->
             tyreWarn = com.minimal.carlauncher.core.TpmsStore.update(com.minimal.carlauncher.core.Tpms.decodeList(json))
             tyreLeak = com.minimal.carlauncher.core.TpmsStore.warnLeak
@@ -105,7 +106,7 @@ object LiveLink {
         val update = got.offer?.let { o ->
             fetchUpdate(context, ip, key, o) { note = it }
         }
-        return Result(ip, added, update, note, tyreWarn, tyreLeak)
+        return Result(ip, added, update, note, tyreWarn, tyreLeak, installVer)
     }
 
     /**

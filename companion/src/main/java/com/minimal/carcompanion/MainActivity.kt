@@ -296,13 +296,31 @@ class MainActivity : Activity() {
             text = "Head unit update: ${newest.version} (car has $carVer)"
             setTextColor(TEXT); textSize = 15f; typeface = Typeface.DEFAULT_BOLD
         })
+        val onCar = LinkStore.carReadyVer(this) == newest.version
+        val total = LinkStore.apkTotal; val sent = LinkStore.apkSent
+        val transferring = ready && !onCar && total > 0 && sent in 1 until total &&
+            System.currentTimeMillis() - LinkStore.apkAt < 15_000
         box.addView(TextView(this).apply {
-            text = if (ready) "Ready on this phone. The car picks it up by itself next time you're in it, then install from About when parked."
-            else "Download it to this phone (about 20 MB); the car gets it straight from the phone, no Wi-Fi needed in the car."
+            text = when {
+                onCar -> "Transferred to the car and ready to install."
+                transferring -> "Sending to the car... ${sent / 1024} / ${total / 1024} KB"
+                ready -> "On this phone. The car pulls it over the live link when you're in the car (a few minutes)."
+                else -> "Download it to this phone (about 20 MB); the car gets it straight from the phone, no Wi-Fi needed in the car."
+            }
             setTextColor(DIM); textSize = 13f; setPadding(0, px(4), 0, px(8))
         })
-        if (!ready) box.addView(button("Download for the car", R.drawable.ic_download) { downloadForCar(newest) },
-            LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, px(44)))
+        if (transferring) box.addView(android.widget.ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 100; progress = ((sent * 100) / total).toInt(); isIndeterminate = false
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        when {
+            onCar -> box.addView(button("Install on the car now", R.drawable.ic_download) {
+                LinkStore.setWantInstall(this@MainActivity, newest.version)
+                LinkService.start(this@MainActivity)
+                Toast.makeText(this@MainActivity, "Installing on the car (within a minute). Keep the car on.", Toast.LENGTH_LONG).show()
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, px(44)))
+            !ready -> box.addView(button("Download for the car", R.drawable.ic_download) { downloadForCar(newest) },
+                LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, px(44)))
+        }
         return box
     }
 

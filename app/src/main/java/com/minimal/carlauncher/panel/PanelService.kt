@@ -1468,6 +1468,7 @@ class PanelService : Service() {
             r.note?.let { log("live link: $it") }
             if (r.added > 0) handler.post { onPhoneFillsAdded() }
             r.tyreWarn?.let { pos -> handler.post { onTyreWarn(pos, r.tyreLeak) } }
+            r.installVer?.let { ver -> handler.post { installFromPhone(ver) } }
             r.update?.let { (tag, file) ->
                 log("live link: launcher $tag received from the phone")
                 handler.post {
@@ -1475,6 +1476,27 @@ class PanelService : Service() {
                     Toast.makeText(this, "Launcher $tag received from your phone. Install it from About when parked.", Toast.LENGTH_LONG).show()
                 }
             }
+        }
+    }
+
+    /** The launcher version the car has downloaded and could install now (empty = none). */
+    private fun readyUpdateVersion(): String {
+        val st = (application as? com.minimal.carlauncher.CarLauncherApp)?.updateRepository?.state?.value
+        return (st as? com.minimal.carlauncher.update.UpdateState.ReadyToInstall)?.release?.tag.orEmpty()
+    }
+
+    /** The phone asked the car to install the update it already has. Root-install it (silent). */
+    private fun installFromPhone(ver: String) {
+        val st = (application as? com.minimal.carlauncher.CarLauncherApp)?.updateRepository?.state?.value
+        val ready = st as? com.minimal.carlauncher.update.UpdateState.ReadyToInstall
+        if (ready == null || ready.release.tag != ver) { log("install $ver from phone: not ready"); return }
+        log("install $ver from phone: starting")
+        Toast.makeText(this, "Installing launcher $ver from your phone...", Toast.LENGTH_LONG).show()
+        val err = com.minimal.carlauncher.update.ApkInstaller.installRoot(this, ready.file)
+        if (err == null) log("install $ver: done (root)")
+        else {
+            log("install $ver: root failed ($err), opening the installer")
+            com.minimal.carlauncher.update.ApkInstaller.install(this, ready.file)
         }
     }
 
@@ -1515,6 +1537,7 @@ class PanelService : Service() {
             chargeAlert = chargeAlert,
             camVer = com.minimal.carlauncher.core.CameraStore.osmSet(this).version,
             stay = if (Prefs.stayOnConnect) 1 else 0,
+            readyVer = readyUpdateVersion(),
             pos = fix?.let { com.minimal.carlauncher.core.CarLink.Pos(it.latitude, it.longitude, it.time, if (it.hasSpeed()) it.speed else 0f) },
             diag = diag,
         )

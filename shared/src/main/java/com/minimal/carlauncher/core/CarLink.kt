@@ -75,6 +75,8 @@ object CarLink {
         val camVer: String = "",
         /** "Stay on current screen when phone connects": 1 on, 0 off, -1 unknown (older launcher). */
         val stay: Int = -1,
+        /** A launcher version the car has downloaded and is ready to install (empty = none). */
+        val readyVer: String = "",
     )
 
     /** Player command: play, pause, next, prev, seek (value = ms), queue (value = queue item id). */
@@ -127,6 +129,7 @@ object CarLink {
         .put("cmd", extra.cmd?.let { JSONObject().put("id", it.id).put("a", it.action).put("v", it.value) } ?: JSONObject.NULL)
         .put("cv", extra.camVer)
         .put("so", extra.stay)
+        .put("rv", extra.readyVer)
         .toString()
 
     data class CarMsg(
@@ -153,6 +156,7 @@ object CarLink {
                 o.optJSONObject("cmd")?.let { Cmd(it.getLong("id"), it.getString("a"), it.optLong("v")) },
                 o.optString("cv"),
                 o.optInt("so", -1),
+                o.optString("rv"),
             ),
         )
     } catch (_: Exception) {
@@ -169,11 +173,14 @@ object CarLink {
     data class PhoneMsg(val fills: List<InboxFill>, val offer: Offer?, val np: NowPlaying? = null, val adb: Boolean = false,
                         val cams: String? = null, val gps: Boolean = false, val setStay: Int = -1,
                         /** Tyre readings from the phone's TPMS scan (encoded list), or null. */
-                        val tyres: String? = null)
+                        val tyres: String? = null,
+                        /** The phone asks the car to install this downloaded version now (null = no). */
+                        val installVer: String? = null)
 
     /** Phone -> car: fill-ups the car hasn't acknowledged yet, an update if the phone has one, what plays. */
     fun phoneMessage(fills: List<InboxFill>, now: Long, offer: Offer? = null, np: NowPlaying? = null, adb: Boolean = false,
-                     cams: String? = null, gps: Boolean = false, setStay: Int = -1, tyres: String? = null): String = JSONObject()
+                     cams: String? = null, gps: Boolean = false, setStay: Int = -1, tyres: String? = null,
+                     installVer: String? = null): String = JSONObject()
         .put("k", "phone").put("t", now)
         .put("fills", JSONArray(fills.map { JSONObject(it.toJson()) }))
         .put("offer", offer?.let { JSONObject().put("ver", it.version).put("size", it.size).put("sha", it.sha256) } ?: JSONObject.NULL)
@@ -183,6 +190,7 @@ object CarLink {
         .put("gps", gps)
         .put("ss", setStay)
         .put("tyres", tyres ?: JSONObject.NULL)
+        .put("iv", installVer ?: JSONObject.NULL)
         .toString()
 
     fun parsePhone(text: String, now: Long): PhoneMsg? = try {
@@ -197,6 +205,7 @@ object CarLink {
             o.optBoolean("gps", false),
             o.optInt("ss", -1),
             if (o.isNull("tyres")) null else o.optString("tyres").ifEmpty { null },
+            if (o.isNull("iv")) null else o.optString("iv").ifEmpty { null },
         )
     } catch (_: Exception) {
         null

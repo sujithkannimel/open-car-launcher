@@ -70,6 +70,27 @@ object ApkInstaller {
         }
     }
 
+    /**
+     * Installs silently with root (the head unit is rooted), so the phone can trigger an update
+     * without anyone tapping the car. Copies the APK somewhere pm can read it, installs, cleans
+     * up. Returns null on success, or a reason it failed (then fall back to [install]).
+     */
+    fun installRoot(context: Context, apk: File): String? {
+        if (!apk.exists()) return "file gone"
+        val tmp = "/data/local/tmp/car-launcher-upd.apk"
+        return try {
+            val script = "cp '${apk.absolutePath}' $tmp && chmod 644 $tmp && " +
+                "pm install -r -d $tmp; RC=$?; rm -f $tmp; exit $RC"
+            val p = Runtime.getRuntime().exec(arrayOf("su", "-c", script))
+            val out = p.inputStream.bufferedReader().readText()
+            val err = p.errorStream.bufferedReader().readText()
+            val ok = p.waitFor() == 0 && (out.contains("Success", true) || err.isBlank())
+            if (ok) null else (err.ifBlank { out }.trim().take(120).ifBlank { "pm install failed" })
+        } catch (e: Exception) {
+            "root not available"
+        }
+    }
+
     /** Called after a successful self-update so stale APKs do not sit in the cache forever. */
     fun clearDownloads(context: Context) {
         runCatching { updateDir(context).listFiles()?.forEach { it.delete() } }

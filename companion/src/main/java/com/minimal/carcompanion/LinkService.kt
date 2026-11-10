@@ -181,13 +181,21 @@ class LinkService : Service() {
                     s.soTimeout = 30_000
                     var sent = 0L
                     try {
+                        val total = offer.first.size
+                        LinkStore.apkProgress(0, total)
                         s.getOutputStream().use { out ->
                             offer.second.inputStream().use { inp ->
                                 val buf = ByteArray(64 * 1024)
-                                while (true) { val n = inp.read(buf); if (n < 0) break; out.write(buf, 0, n); sent += n }
+                                var lastNotify = 0L
+                                while (true) {
+                                    val n = inp.read(buf); if (n < 0) break
+                                    out.write(buf, 0, n); sent += n
+                                    if (sent - lastNotify >= 256 * 1024) { lastNotify = sent; LinkStore.apkProgress(sent, total); LinkStore.notifyListeners() }
+                                }
                                 out.flush()
                             }
                         }
+                        LinkStore.apkProgress(sent, total); LinkStore.notifyListeners()
                         LinkStore.note(this, "sent launcher $ver: ${sent / 1024} KB")
                     } catch (e: Exception) {
                         LinkStore.note(this, "sending $ver stopped after ${sent / 1024} KB: ${e.javaClass.simpleName}")
@@ -209,11 +217,15 @@ class LinkService : Service() {
                 // Tyre readings from the BLE scan (null when off / none heard).
                 if (TpmsScanner.canScan(this)) TpmsScanner.start(this) else TpmsScanner.stop()
                 val tyres = TpmsScanner.tyresFor(this).takeIf { it.isNotEmpty() }?.let { com.minimal.carlauncher.core.Tpms.encode(it) }
+                // Install-on-car: send the request until the car reports it's now running that version.
+                val wantInstall = LinkStore.wantInstall(this).let { w ->
+                    if (w.isNotEmpty() && w == msg.extra.appVersion) { LinkStore.setWantInstall(this, ""); "" } else w
+                }.ifEmpty { null }
                 // "Stay on current screen" changed here: send it until the car reports the new value.
                 LinkStore.setCarStay(this, msg.extra.stay)
                 val want = LinkStore.wantStay(this).let { w -> if (w != -1 && w == msg.extra.stay) { LinkStore.setWantStay(this, -1); -1 } else w }
                 val reply = CarLink.seal(key, CarLink.phoneMessage(LinkStore.localFills(this), now, offer, np, AdbBridge.isOn(now), cams,
-                    GpsShare.canShare(this), want, tyres))
+                    GpsShare.canShare(this), want, tyres, wantInstall))
                 s.getOutputStream().apply { write((reply + "\n").toByteArray()); flush() }
                 LinkStore.saveLive(this, msg, s.inetAddress?.hostAddress.orEmpty())
                 main.post {
@@ -415,6 +427,18 @@ object LinkStore {
     /** A change made on the phone, waiting for the car to take it (-1 none). */
     fun wantStay(c: Context) = sp(c).getInt("wantStay", -1)
     fun setWantStay(c: Context, v: Int) = sp(c).edit().putInt("wantStay", v).apply()
+
+    /** Live APK-transfer progress to the car (in-memory; for the phone's progress bar). */
+    @Volatile var apkSent = 0L
+    @Volatile var apkTotal = 0L
+    @Volatile var apkAt = 0L
+    fun apkProgress(sent: Long, total: Long) { apkSent = sent; apkTotal = total; apkAt = System.currentTimeMillis() }
+
+    /** The version the car says it has downloaded and can install (from its last message). */
+    fun carReadyVer(c: Context) = sp(c).getString("carReadyVer", "") ?: ""
+    /** A version the phone wants the car to install now (-/empty = none). */
+    fun wantInstall(c: Context) = sp(c).getString("wantInstall", "") ?: ""
+    fun setWantInstall(c: Context, v: String) = sp(c).edit().putString("wantInstall", v).apply()
     fun diag(c: Context): String = sp(c).getString("diag", "") ?: ""
     /** The car's own data as it last sent it (its backup JSON: no tokens or keys). */
     fun cachedJson(c: Context): String? = sp(c).getString("cache", null)?.takeIf { it.isNotBlank() }
@@ -437,6 +461,7 @@ object LinkStore {
             .putLong("liveAt", System.currentTimeMillis())
             .putString("liveFrom", from)
         if (m.extra.appVersion.isNotEmpty()) e.putString("carVersion", m.extra.appVersion)
+        e.putString("carReadyVer", m.extra.readyVer)
         m.extra.diag?.let { e.putString("diag", it) }
         m.extra.pos?.let { e.putString("pos", "${it.lat},${it.lon},${it.at},${it.speed}") }
         e.apply()
