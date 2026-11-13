@@ -797,24 +797,41 @@ class MainActivity : Activity() {
     /** A tyre-pressure card (four wheels) from the phone's own BLE scan, or null when TPMS is off. */
     private fun tyreCard(): View? {
         if (!TpmsScanner.enabled(this)) return null
-        val tyres = TpmsScanner.tyresFor(this).associateBy { it.pos }
+        val tyres = TpmsScanner.displayFor(this)
         val box = cardBox()
-        box.addView(TextView(this).apply { text = "Tyre pressure"; setTextColor(TEXT); textSize = 16f; typeface = Typeface.DEFAULT_BOLD })
+        val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        head.addView(TextView(this).apply { text = "Tyre pressure"; setTextColor(TEXT); textSize = 16f; typeface = Typeface.DEFAULT_BOLD },
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        head.addView(iconButton(R.drawable.ic_refresh, "Refresh tyres") {
+            if (TpmsScanner.canScan(this)) { TpmsScanner.stop(); TpmsScanner.start(this) }
+            Toast.makeText(this, if (TpmsScanner.canScan(this)) "Scanning..." else "Turn on Bluetooth and the tyre setting", Toast.LENGTH_SHORT).show()
+            render()
+        })
+        box.addView(head)
         if (tyres.isEmpty()) {
-            box.addView(small("Waiting for the sensors. Be near the car and drive a little to wake them."))
+            box.addView(small("Waiting for the sensors. Be near the car and drive a little to wake them. Bluetooth must be on."))
             return box
         }
         fun cell(pos: String): View {
-            val t = tyres[pos]
+            val pair = tyres[pos]
+            val t = pair?.first
+            val age = pair?.second ?: -1
+            val stale = t == null || age > 180
             val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(px(4), px(8), px(4), px(8)) }
             val label = com.minimal.carlauncher.core.Tpms.posLabel(pos)
+            val colour = when {
+                t == null || stale -> DIM
+                t.psi < 26 -> RED
+                t.psi < 28 -> AMBER
+                else -> GREEN
+            }
             col.addView(TextView(this).apply {
                 text = t?.let { "${it.psi.toInt()} psi" } ?: "--"
-                setTextColor(when { t == null -> DIM; t.psi < 26 -> RED; t.psi < 28 -> AMBER; else -> GREEN })
-                textSize = 24f; typeface = Typeface.DEFAULT_BOLD
+                setTextColor(colour); textSize = 24f; typeface = Typeface.DEFAULT_BOLD
             })
+            val ageTxt = when { t == null -> ""; age < 5 -> "  \u00B7 now"; age < 120 -> "  \u00B7 ${age}s ago"; else -> "  \u00B7 ${age / 60}m ago" }
             col.addView(TextView(this).apply {
-                text = label.uppercase(Locale.US) + (t?.let { if (it.tempC >= 0) "  \u00B7 ${it.tempC.toInt()}\u00B0C" else "" } ?: "")
+                text = label.uppercase(Locale.US) + (t?.let { if (it.tempC >= 0) "  \u00B7 ${it.tempC.toInt()}\u00B0C" else "" } ?: "") + ageTxt
                 setTextColor(DIM); textSize = 11f
             })
             return col

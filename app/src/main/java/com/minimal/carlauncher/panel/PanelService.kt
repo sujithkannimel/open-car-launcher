@@ -477,7 +477,6 @@ class PanelService : Service() {
         battCol.addView(batteryBadge, LinearLayout.LayoutParams(W, W))
         battCol.addView(subRow, LinearLayout.LayoutParams(W, W))
         leftCluster.addView(battCol, LinearLayout.LayoutParams(W, W))
-        leftCluster.addView(buildTyreStrip(), LinearLayout.LayoutParams(W, W).apply { leftMargin = px(14f) })
         batteryBadgeView = batteryBadge
         battLabelView = battSubtitle
         tripView = trip
@@ -550,6 +549,7 @@ class PanelService : Service() {
         shownDockActive = -2
         updateDockActive()
 
+        centerBar.addView(buildTyreStrip(), LinearLayout.LayoutParams(W, W).apply { rightMargin = px(10f) })
         for (b in listOf(btnHome, btnApps, btnNav)) {
             centerBar.addView(b, LinearLayout.LayoutParams(W, W).apply {
                 leftMargin = px(10f); rightMargin = px(10f)

@@ -69,6 +69,21 @@ object TpmsScanner {
 
     fun lastReading(mac: String): Tpms.Reading? = synchronized(readings) { readings[mac.lowercase()]?.r }
 
+    /** Last reading per mapped wheel, any age (for the phone card). Position -> (reading, ageSec). */
+    fun displayFor(c: Context): Map<String, Pair<Tpms.Reading, Int>> {
+        val now = SystemClock.elapsedRealtime()
+        val out = HashMap<String, Pair<Tpms.Reading, Int>>()
+        synchronized(readings) {
+            for ((mac, live) in readings) {
+                val pos = positionOf(c, mac) ?: continue
+                val age = ((now - live.at) / 1000L).toInt()
+                val prev = out[pos]
+                if (prev == null || age < prev.second) out[pos] = live.r to age
+            }
+        }
+        return out
+    }
+
     // ---- scanning ----
 
     fun start(c: Context) {
@@ -76,7 +91,8 @@ object TpmsScanner {
         val s = BluetoothAdapter.getDefaultAdapter()?.bluetoothLeScanner ?: return
         scanner = s
         val settings = ScanSettings.Builder()
-            .setScanMode(ScanSettings.SCAN_MODE_LOW_POWER)
+            .setScanMode(ScanSettings.SCAN_MODE_BALANCED)
+            .setReportDelay(0L)
             .build()
         try {
             s.startScan(null, settings, callback)      // no filter: TREEL adverts vary; decode sorts them
