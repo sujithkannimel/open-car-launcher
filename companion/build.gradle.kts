@@ -19,8 +19,8 @@ android {
         applicationId = "com.minimal.carcompanion"
         minSdk = 29
         targetSdk = 35
-        versionCode = 31
-        versionName = "1.30"
+        versionCode = 32
+        versionName = "1.31"
     }
 
     signingConfigs {

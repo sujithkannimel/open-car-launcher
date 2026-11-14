@@ -1099,13 +1099,13 @@ class PanelService : Service() {
     private fun buildTyreStrip(): View {
         val cells = Array(4) {
             TextView(this).apply {
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
                 typeface = Typeface.MONOSPACE
                 setTypeface(typeface, Typeface.BOLD)
                 gravity = Gravity.CENTER
                 includeFontPadding = false
-                minWidth = px(30f)
-                setPadding(px(3f), px(1f), px(3f), px(1f))
+                minWidth = px(38f)
+                setPadding(px(5f), px(1f), px(5f), px(2f))
             }
         }
         fun row(a: Int, b: Int) = LinearLayout(this).apply {
@@ -1116,7 +1116,7 @@ class PanelService : Service() {
         val caption = TextView(this).apply {
             text = "TYRES"
             setTextColor(Neon.DIM)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 9f)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
             letterSpacing = 0.1f
             gravity = Gravity.CENTER
             includeFontPadding = false

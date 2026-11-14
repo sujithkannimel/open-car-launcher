@@ -835,7 +835,9 @@ class MainActivity : Activity() {
             })
             val ageTxt = when { t == null -> ""; age < 5 -> "  \u00B7 now"; age < 120 -> "  \u00B7 ${age}s ago"; else -> "  \u00B7 ${age / 60}m ago" }
             col.addView(TextView(this).apply {
-                text = label.uppercase(Locale.US) + (t?.let { if (it.tempC >= 0) "  \u00B7 ${it.tempC.toInt()}\u00B0C" else "" } ?: "") + ageTxt
+                text = label.uppercase(Locale.US) +
+                    (t?.let { if (it.tempC >= 0) "  \u00B7 ${it.tempC.toInt()}\u00B0C" else "" } ?: "") +
+                    (t?.let { if (it.batt in 1..100) "  \u00B7 \uD83D\uDD0B ${it.batt}%" else "" } ?: "") + ageTxt
                 setTextColor(DIM); textSize = 11f
             })
             return col
