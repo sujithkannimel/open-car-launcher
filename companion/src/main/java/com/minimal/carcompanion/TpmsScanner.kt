@@ -127,27 +127,71 @@ object TpmsScanner {
 
     // ---- scanning ----
 
+    /** True while the phone app is on screen (set by the activity). */
+    @Volatile private var foreground = false
+    private var lastStartAt = 0L
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+
+    fun setForeground(c: Context, on: Boolean) {
+        foreground = on
+        if (on || scanning) start(c)
+    }
+
     /**
-     * [fast] = low-latency (scans flat out, catches every wheel within a second or two, like the
-     * TREEL app) - used while the phone app is open. Otherwise balanced, to spare the battery
-     * while driving. Switching mode restarts the scan.
+     * Background filters: Android pauses a scan with no filter whenever the screen is off, which
+     * is most of a drive. Match the TREEL service UUID and each known sensor's address instead.
      */
-    fun start(c: Context, fast: Boolean = false) {
+    private fun backgroundFilters(c: Context): List<android.bluetooth.le.ScanFilter> {
+        val out = ArrayList<android.bluetooth.le.ScanFilter>()
+        out += android.bluetooth.le.ScanFilter.Builder()
+            .setServiceUuid(android.os.ParcelUuid.fromString("0000ffe0-0000-1000-8000-00805f9b34fb")).build()
+        val macs = HashSet(SEED.keys)
+        sp(c).all.keys.filter { it.startsWith("pos_") }.forEach { macs += it.removePrefix("pos_") }
+        for (m in macs) try {
+            out += android.bluetooth.le.ScanFilter.Builder().setDeviceAddress(m.uppercase()).build()
+        } catch (_: Exception) {}
+        return out
+    }
+
+    /**
+     * Starts (or re-modes) the scan. App on screen: low-latency and unfiltered, so every wheel
+     * shows within a second or two and new sensors can be found. Otherwise balanced and filtered,
+     * which keeps working with the screen off. Only the activity's [setForeground] picks the
+     * mode, so the link service calling this every few seconds never downgrades it. Restarts are
+     * spaced out: Android silently blocks an app that starts more than 5 scans in 30 s.
+     */
+    fun start(c: Context) {
         load(c)
+        val fast = foreground
         if (scanning && fast == fastMode) return
         if (!canScan(c)) return
+        val now = SystemClock.elapsedRealtime()
+        val since = now - lastStartAt
+        if (lastStartAt != 0L && since < 7_000L) {
+            val app = c.applicationContext
+            main.removeCallbacksAndMessages(null)
+            main.postDelayed({ if (scanning || foreground) start(app) }, 7_200L - since)
+            return
+        }
         val s = BluetoothAdapter.getDefaultAdapter()?.bluetoothLeScanner ?: return
         if (scanning) stop()                            // restart to change mode
         scanner = s
         fastMode = fast
+        lastStartAt = now
         val settings = ScanSettings.Builder()
             .setScanMode(if (fast) ScanSettings.SCAN_MODE_LOW_LATENCY else ScanSettings.SCAN_MODE_BALANCED)
             .setReportDelay(0L)
             .build()
         try {
-            s.startScan(null, settings, callback)      // no filter: TREEL adverts vary; decode sorts them
+            s.startScan(if (fast) null else backgroundFilters(c), settings, callback)
             scanning = true
         } catch (_: SecurityException) {} catch (_: Exception) {}
+    }
+
+    /** The refresh button: restart the scan, unless it was (re)started moments ago. */
+    fun refresh(c: Context) {
+        if (SystemClock.elapsedRealtime() - lastStartAt < 7_000L) return
+        stop(); start(c)
     }
 
     fun stop() {
