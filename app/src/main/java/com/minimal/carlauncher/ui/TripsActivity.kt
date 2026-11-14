@@ -684,8 +684,7 @@ class TripsActivity : AppCompatActivity() {
 
     private fun renderTyres() {
         content.addView(title("Tyre pressure"))
-        val tyres = com.minimal.carlauncher.core.TpmsStore.all()
-        if (tyres.isEmpty()) {
+        if (!com.minimal.carlauncher.core.TpmsStore.anyKnown()) {
             content.addView(body("No tyre readings yet."))
             content.addView(hint("TREEL sensors are read by your phone and sent over the live link. Turn it on in " +
                 "Car Companion \u2192 Settings \u2192 \"Show tyre pressure on the car\", and assign each sensor to a wheel there. " +
@@ -694,12 +693,14 @@ class TripsActivity : AppCompatActivity() {
         }
         val low = Prefs.tpmsLowPsi
         fun colour(psi: Float) = when { psi < low -> RED; psi < low + 2 -> AMBER; else -> GREEN }
+        fun age(sec: Int) = when { sec < 60 -> "${sec}s ago"; sec < 3600 -> "${sec / 60}m ago"; else -> "${sec / 3600}h ago" }
         fun stat(pos: String): Stat {
-            val t = com.minimal.carlauncher.core.TpmsStore.tyre(pos)
+            val t = com.minimal.carlauncher.core.TpmsStore.last(pos)
             val name = com.minimal.carlauncher.core.Tpms.posLabel(pos).uppercase(Locale.US)
             if (t == null) return Stat("--", "$name \u00B7 NO SIGNAL", TEXT)
-            val extra = (if (t.tempC >= 0) " \u00B7 ${t.tempC.toInt()}\u00B0C" else "") + (if (t.batt in 1..100) " \u00B7 ${t.batt}%" else "")
-            return Stat(String.format(Locale.US, "%.0f psi", t.psi), "$name$extra", colour(t.psi))
+            val extra = (if (t.tempC >= 0) " \u00B7 ${t.tempC.toInt()}\u00B0C" else "") + (if (t.batt in 1..100) " \u00B7 ${t.batt}%" else "") +
+                (if (!t.fresh) " \u00B7 ${age(t.ageSec)}" else "")
+            return Stat(String.format(Locale.US, "%.0f psi", t.psi), "$name$extra", if (t.fresh) colour(t.psi) else TEXT)
         }
         content.addView(statRow(listOf(stat(com.minimal.carlauncher.core.Tpms.FL), stat(com.minimal.carlauncher.core.Tpms.FR))))
         content.addView(statRow(listOf(stat(com.minimal.carlauncher.core.Tpms.RL), stat(com.minimal.carlauncher.core.Tpms.RR))))

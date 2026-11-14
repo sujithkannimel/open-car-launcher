@@ -133,7 +133,7 @@ object TpmsScanner {
         val out = ArrayList<Tpms.Tyre>()
         synchronized(readings) {
             for ((mac, live) in readings) {
-                if (now - live.at > 180_000L) continue
+                if (now - live.at > 3_600_000L) continue   // keep last-known up to 1 h; sensors sleep when parked
                 val pos = positionOf(c, mac) ?: continue
                 out += Tpms.Tyre(pos, live.r.psi, live.r.tempC, live.r.batt, ((now - live.at) / 1000L).toInt())
             }

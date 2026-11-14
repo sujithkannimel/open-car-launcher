@@ -1142,17 +1142,18 @@ class PanelService : Service() {
         val cells = tyreCells ?: return
         val block = tyreBlock ?: return
         val store = com.minimal.carlauncher.core.TpmsStore
-        if (!store.any()) { block.visibility = View.GONE; return }
+        if (!store.anyKnown()) { block.visibility = View.GONE; return }
         block.visibility = View.VISIBLE
         val low = Prefs.tpmsLowPsi
         val pos = arrayOf(com.minimal.carlauncher.core.Tpms.FL, com.minimal.carlauncher.core.Tpms.FR,
             com.minimal.carlauncher.core.Tpms.RL, com.minimal.carlauncher.core.Tpms.RR)
         for (i in 0..3) {
-            val t = store.tyre(pos[i])
+            val t = store.last(pos[i])
             if (t == null) { cells[i].text = "--"; cells[i].setTextColor(Neon.DIM) }
             else {
                 cells[i].text = t.psi.roundToInt().toString()
-                cells[i].setTextColor(when {
+                // Stale (sensor asleep while parked): keep the number but dim it.
+                cells[i].setTextColor(if (!t.fresh) Neon.DIM else when {
                     t.psi < low -> Neon.RED
                     t.psi < low + 2 -> Neon.AMBER
                     else -> Color.rgb(74, 222, 128)

@@ -12,6 +12,7 @@ object TpmsStore {
 
     data class Tyre(val pos: String, val psi: Float, val tempC: Float, val batt: Int, val at: Long) {
         val fresh: Boolean get() = SystemClock.elapsedRealtime() - at < 120_000L
+        val ageSec: Int get() = ((SystemClock.elapsedRealtime() - at) / 1000L).toInt()
     }
 
     @Volatile private var map: Map<String, Tyre> = emptyMap()
@@ -32,6 +33,11 @@ object TpmsStore {
     fun tyre(pos: String): Tyre? = map[pos]?.takeIf { it.fresh }
     fun all(): List<Tyre> = Tpms.POSITIONS.mapNotNull { tyre(it) }
     fun any(): Boolean = all().isNotEmpty()
+
+    /** Last reading for a wheel, however old (for display: sensors sleep when parked). */
+    fun last(pos: String): Tyre? = map[pos]
+    /** Any wheel we've ever heard from, fresh or stale. */
+    fun anyKnown(): Boolean = Tpms.POSITIONS.any { map[it] != null }
 
     /** New readings from the phone. Returns a position to warn about now (new warning), else null. */
     fun update(tyres: List<Tpms.Tyre>): String? {
