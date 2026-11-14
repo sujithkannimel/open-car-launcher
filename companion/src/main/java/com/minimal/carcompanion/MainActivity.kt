@@ -221,7 +221,7 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         LinkStore.addListener(liveListener)
-        if (TpmsScanner.canScan(this)) TpmsScanner.start(this)
+        if (TpmsScanner.canScan(this)) TpmsScanner.start(this, fast = true)
         subtitle.postDelayed(ticker, 15_000)
         subtitle.postDelayed(tyreTicker, 4_000)
         CameraUpdater.maybeFetch(this)       // first list right after install, then weekly
@@ -231,6 +231,9 @@ class MainActivity : Activity() {
         LinkStore.removeListener(liveListener)
         subtitle.removeCallbacks(ticker)
         subtitle.removeCallbacks(tyreTicker)
+        // Leave the heavy scan: keep a light one only while the car link is live, else stop.
+        if (System.currentTimeMillis() - LinkStore.liveAt(this) < 120_000) TpmsScanner.start(this, fast = false)
+        else TpmsScanner.stop()
         super.onPause()
     }
 
@@ -804,7 +807,7 @@ class MainActivity : Activity() {
         head.addView(TextView(this).apply { text = "Tyre pressure"; setTextColor(TEXT); textSize = 16f; typeface = Typeface.DEFAULT_BOLD },
             LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         head.addView(iconButton(R.drawable.ic_refresh, "Refresh tyres") {
-            if (TpmsScanner.canScan(this)) { TpmsScanner.stop(); TpmsScanner.start(this) }
+            if (TpmsScanner.canScan(this)) { TpmsScanner.stop(); TpmsScanner.start(this, fast = true) }
             Toast.makeText(this, if (TpmsScanner.canScan(this)) "Scanning..." else "Turn on Bluetooth and the tyre setting", Toast.LENGTH_SHORT).show()
             render()
         })

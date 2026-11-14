@@ -24,6 +24,7 @@ object TpmsScanner {
     private data class Live(val r: Tpms.Reading, val at: Long)
     private val readings = HashMap<String, Live>()          // MAC (lowercase) -> latest
     @Volatile private var scanning = false
+    @Volatile private var fastMode = false          // low-latency while the phone app is open
     private var scanner: android.bluetooth.le.BluetoothLeScanner? = null
 
     private fun sp(c: Context) = c.getSharedPreferences("tpms", Context.MODE_PRIVATE)
@@ -86,18 +87,25 @@ object TpmsScanner {
 
     // ---- scanning ----
 
-    fun start(c: Context) {
-        if (scanning || !canScan(c)) return
+    /**
+     * [fast] = low-latency (scans flat out, catches every wheel within a second or two, like the
+     * TREEL app) - used while the phone app is open. Otherwise balanced, to spare the battery
+     * while driving. Switching mode restarts the scan.
+     */
+    fun start(c: Context, fast: Boolean = false) {
+        if (scanning && fast == fastMode) return
+        if (!canScan(c)) return
         val s = BluetoothAdapter.getDefaultAdapter()?.bluetoothLeScanner ?: return
+        if (scanning) stop()                            // restart to change mode
         scanner = s
+        fastMode = fast
         val settings = ScanSettings.Builder()
-            .setScanMode(ScanSettings.SCAN_MODE_BALANCED)
+            .setScanMode(if (fast) ScanSettings.SCAN_MODE_LOW_LATENCY else ScanSettings.SCAN_MODE_BALANCED)
             .setReportDelay(0L)
             .build()
         try {
             s.startScan(null, settings, callback)      // no filter: TREEL adverts vary; decode sorts them
             scanning = true
-            LinkStore.note(c, "tpms: scanning for tyre sensors")
         } catch (_: SecurityException) {} catch (_: Exception) {}
     }
 
