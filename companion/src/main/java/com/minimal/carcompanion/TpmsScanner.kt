@@ -32,7 +32,10 @@ object TpmsScanner {
     fun enabled(c: Context) = sp(c).getBoolean("on", false)
     fun setEnabled(c: Context, on: Boolean) {
         sp(c).edit().putBoolean("on", on).apply()
-        if (!on) { readings.clear() }
+        if (!on) {
+            readings.clear()
+            val e = sp(c).edit(); sp(c).all.keys.filter { it.startsWith("last_") }.forEach { e.remove(it) }; e.apply()
+        }
     }
 
     fun hasScanPermission(c: Context) =
@@ -72,6 +75,7 @@ object TpmsScanner {
 
     /** Last reading per mapped wheel, any age (for the phone card). Position -> (reading, ageSec). */
     fun displayFor(c: Context): Map<String, Pair<Tpms.Reading, Int>> {
+        load(c)
         val now = SystemClock.elapsedRealtime()
         val out = HashMap<String, Pair<Tpms.Reading, Int>>()
         synchronized(readings) {
@@ -85,6 +89,42 @@ object TpmsScanner {
         return out
     }
 
+    // ---- persistence: last reading per sensor survives an app restart ----
+
+    @Volatile private var loaded = false
+    private val savedAt = HashMap<String, Long>()          // MAC -> elapsed time of last save
+
+    /** Restores saved readings (under 12 h old) once per process. */
+    private fun load(c: Context) {
+        if (loaded) return
+        loaded = true
+        appCtx = c.applicationContext
+        val wallNow = System.currentTimeMillis(); val elNow = SystemClock.elapsedRealtime()
+        synchronized(readings) {
+            for ((k, v) in sp(c).all) {
+                if (!k.startsWith("last_") || v !is String) continue
+                val f = v.split(",")
+                if (f.size != 4) continue
+                try {
+                    val age = wallNow - f[3].toLong()
+                    if (age < 0 || age > 12 * 3_600_000L) continue
+                    val mac = k.removePrefix("last_")
+                    if (readings[mac] == null)
+                        readings[mac] = Live(Tpms.Reading(f[0].toFloat(), f[1].toFloat(), f[2].toInt()), elNow - age)
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
+    private fun save(mac: String, r: Tpms.Reading) {
+        val c = appCtx ?: return
+        val now = SystemClock.elapsedRealtime()
+        val prev = savedAt[mac]
+        if (prev != null && now - prev < 10_000L) return     // at most one write per sensor per 10 s
+        savedAt[mac] = now
+        sp(c).edit().putString("last_$mac", "${r.psi},${r.tempC},${r.batt},${System.currentTimeMillis()}").apply()
+    }
+
     // ---- scanning ----
 
     /**
@@ -93,6 +133,7 @@ object TpmsScanner {
      * while driving. Switching mode restarts the scan.
      */
     fun start(c: Context, fast: Boolean = false) {
+        load(c)
         if (scanning && fast == fastMode) return
         if (!canScan(c)) return
         val s = BluetoothAdapter.getDefaultAdapter()?.bluetoothLeScanner ?: return
@@ -124,11 +165,13 @@ object TpmsScanner {
             val reading = Tpms.decode(bytes) ?: return
             val mac = result.device.address.lowercase()
             synchronized(readings) { readings[mac] = Live(reading, SystemClock.elapsedRealtime()) }
+            save(mac, reading)
         }
     }
 
     /** Readings for the four mapped tyres, freshest kept, as the car wants them. Drops stale (>3 min). */
     fun tyresFor(c: Context): List<Tpms.Tyre> {
+        load(c)
         val now = SystemClock.elapsedRealtime()
         val out = ArrayList<Tpms.Tyre>()
         synchronized(readings) {
