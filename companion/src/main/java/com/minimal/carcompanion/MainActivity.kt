@@ -943,6 +943,15 @@ class MainActivity : Activity() {
         })
         link("Tyres: assign sensors to wheels") { tyresDialog() }
 
+        col.addView(android.widget.CheckBox(this).apply {
+            text = "Aggressive tyre scanning (catches every wheel like the TREEL app, uses more battery)"
+            isChecked = TpmsScanner.aggressive(this@MainActivity)
+            setTextColor(TEXT)
+            setOnCheckedChangeListener { _, on -> TpmsScanner.setAggressive(this@MainActivity, on) }
+        })
+        col.addView(small("Leave off for the gentle scan, which still keeps the last reading for each " +
+            "wheel. Turn on when you want all four to stay live and don't mind the extra drain."))
+
         col.addView(small("Car"))
         fun camLabel(): String {
             val set = CameraUpdater.set(this@MainActivity)

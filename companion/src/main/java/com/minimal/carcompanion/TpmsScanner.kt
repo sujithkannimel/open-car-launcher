@@ -24,7 +24,7 @@ object TpmsScanner {
     private data class Live(val r: Tpms.Reading, val at: Long)
     private val readings = HashMap<String, Live>()          // MAC (lowercase) -> latest
     @Volatile private var scanning = false
-    @Volatile private var fastMode = false          // low-latency while the phone app is open
+    @Volatile private var aggressiveMode = false    // mode the current scan is running in
     private var scanner: android.bluetooth.le.BluetoothLeScanner? = null
 
     private fun sp(c: Context) = c.getSharedPreferences("tpms", Context.MODE_PRIVATE)
@@ -127,21 +127,27 @@ object TpmsScanner {
 
     // ---- scanning ----
 
-    /** True while the phone app is on screen (set by the activity). */
-    @Volatile private var foreground = false
     private var lastStartAt = 0L
+    @Volatile private var wantScan = false
     private val main = android.os.Handler(android.os.Looper.getMainLooper())
 
-    fun setForeground(c: Context, on: Boolean) {
-        foreground = on
-        if (on || scanning) start(c)
+    /**
+     * "Aggressive scan": run the radio flat out (low-latency) instead of balanced, so even the
+     * weak, slow-broadcasting wheels (the fronts) are caught as often as the TREEL app catches
+     * them. Costs more phone battery; off by default. Scanning still stops when you leave the car.
+     */
+    fun aggressive(c: Context) = sp(c).getBoolean("aggressive", false)
+    fun setAggressive(c: Context, on: Boolean) {
+        sp(c).edit().putBoolean("aggressive", on).apply()
+        if (scanning) start(c)                           // re-mode the running scan
     }
 
-    /**
-     * Background filters: Android pauses a scan with no filter whenever the screen is off, which
-     * is most of a drive. Match the TREEL service UUID and each known sensor's address instead.
-     */
-    private fun backgroundFilters(c: Context): List<android.bluetooth.le.ScanFilter> {
+    /** The activity calls this as the app comes to / leaves the screen. */
+    fun setForeground(c: Context, on: Boolean) { if (on) start(c) }
+
+    /** TREEL service UUID + each known sensor address. A filtered scan keeps running with the
+     *  screen off (an unfiltered one does not); the UUID still lets a new sensor be discovered. */
+    private fun scanFilters(c: Context): List<android.bluetooth.le.ScanFilter> {
         val out = ArrayList<android.bluetooth.le.ScanFilter>()
         out += android.bluetooth.le.ScanFilter.Builder()
             .setServiceUuid(android.os.ParcelUuid.fromString("0000ffe0-0000-1000-8000-00805f9b34fb")).build()
@@ -154,47 +160,50 @@ object TpmsScanner {
     }
 
     /**
-     * Starts (or re-modes) the scan. App on screen: low-latency and unfiltered, so every wheel
-     * shows within a second or two and new sensors can be found. Otherwise balanced and filtered,
-     * which keeps working with the screen off. Only the activity's [setForeground] picks the
-     * mode, so the link service calling this every few seconds never downgrades it. Restarts are
+     * One continuous, filtered scan. Match mode AGGRESSIVE and callback ALL_MATCHES surface even
+     * faint, infrequent broadcasts (the front wheels) and every repeat, like the reference
+     * firmware's no-duplicate-filter scan. It is NOT restarted on foreground/background - only when
+     * the mode changes or Bluetooth is toggled - so no packets are lost re-arming. Restarts are
      * spaced out: Android silently blocks an app that starts more than 5 scans in 30 s.
      */
     fun start(c: Context) {
         load(c)
-        val fast = foreground
-        if (scanning && fast == fastMode) return
+        wantScan = true
+        val wantAggr = aggressive(c)
+        if (scanning && wantAggr == aggressiveMode) return    // already scanning in the right mode
         if (!canScan(c)) return
         val now = SystemClock.elapsedRealtime()
         val since = now - lastStartAt
-        if (lastStartAt != 0L && since < 7_000L) {
+        if (lastStartAt != 0L && since < 7_000L) {            // too soon: schedule the (re)start
             val app = c.applicationContext
             main.removeCallbacksAndMessages(null)
-            main.postDelayed({ if (scanning || foreground) start(app) }, 7_200L - since)
+            main.postDelayed({ if (wantScan) start(app) }, 7_200L - since)
             return
         }
         val s = BluetoothAdapter.getDefaultAdapter()?.bluetoothLeScanner ?: return
-        if (scanning) stop()                            // restart to change mode
+        if (scanning) stop(keepWant = true)                   // restart only to change mode
         scanner = s
-        fastMode = fast
+        aggressiveMode = wantAggr
         lastStartAt = now
-        val settings = ScanSettings.Builder()
-            .setScanMode(if (fast) ScanSettings.SCAN_MODE_LOW_LATENCY else ScanSettings.SCAN_MODE_BALANCED)
+        val b = ScanSettings.Builder()
+            .setScanMode(if (wantAggr) ScanSettings.SCAN_MODE_LOW_LATENCY else ScanSettings.SCAN_MODE_BALANCED)
             .setReportDelay(0L)
-            .build()
+        if (Build.VERSION.SDK_INT >= 23) {
+            b.setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES)
+            b.setMatchMode(ScanSettings.MATCH_MODE_AGGRESSIVE)
+            b.setNumOfMatches(ScanSettings.MATCH_NUM_MAX_ADVERTISEMENT)
+        }
         try {
-            s.startScan(if (fast) null else backgroundFilters(c), settings, callback)
+            s.startScan(scanFilters(c), b.build(), callback)
             scanning = true
         } catch (_: SecurityException) {} catch (_: Exception) {}
     }
 
-    /** The refresh button: restart the scan, unless it was (re)started moments ago. */
-    fun refresh(c: Context) {
-        if (SystemClock.elapsedRealtime() - lastStartAt < 7_000L) return
-        stop(); start(c)
-    }
+    /** The refresh button: make sure a scan is running (it usually already is). */
+    fun refresh(c: Context) = start(c)
 
-    fun stop() {
+    fun stop(keepWant: Boolean = false) {
+        if (!keepWant) { wantScan = false; main.removeCallbacksAndMessages(null) }
         val s = scanner ?: return
         try { s.stopScan(callback) } catch (_: Exception) {}
         scanning = false
