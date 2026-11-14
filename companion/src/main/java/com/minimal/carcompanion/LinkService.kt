@@ -219,7 +219,7 @@ class LinkService : Service() {
                 val tyres = TpmsScanner.tyresFor(this).takeIf { it.isNotEmpty() }?.let { com.minimal.carlauncher.core.Tpms.encode(it) }
                 // Install-on-car: send the request until the car reports it's now running that version.
                 val wantInstall = LinkStore.wantInstall(this).let { w ->
-                    if (w.isNotEmpty() && w == msg.extra.appVersion) { LinkStore.setWantInstall(this, ""); "" } else w
+                    if (w.isNotEmpty() && w.removePrefix("v") == msg.extra.appVersion.removePrefix("v")) { LinkStore.setWantInstall(this, ""); "" } else w
                 }.ifEmpty { null }
                 // "Stay on current screen" changed here: send it until the car reports the new value.
                 LinkStore.setCarStay(this, msg.extra.stay)

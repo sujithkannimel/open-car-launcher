@@ -308,7 +308,8 @@ class MainActivity : Activity() {
             text = "Head unit update: ${newest.version} (car has $carVer)"
             setTextColor(TEXT); textSize = 15f; typeface = Typeface.DEFAULT_BOLD
         })
-        val onCar = LinkStore.carReadyVer(this) == newest.version
+        // The car may report its ready version with or without a leading 'v' - match either.
+        val onCar = LinkStore.carReadyVer(this).removePrefix("v") == newest.version.removePrefix("v")
         val total = LinkStore.apkTotal; val sent = LinkStore.apkSent
         val transferring = ready && !onCar && total > 0 && sent in 1 until total &&
             System.currentTimeMillis() - LinkStore.apkAt < 15_000
@@ -326,7 +327,7 @@ class MainActivity : Activity() {
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         when {
             onCar -> box.addView(button("Install on the car now", R.drawable.ic_download) {
-                LinkStore.setWantInstall(this@MainActivity, newest.version)
+                LinkStore.setWantInstall(this@MainActivity, LinkStore.carReadyVer(this@MainActivity).ifEmpty { newest.version })
                 LinkService.start(this@MainActivity)
                 Toast.makeText(this@MainActivity, "Installing on the car (within a minute). Keep the car on.", Toast.LENGTH_LONG).show()
             }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, px(44)))
