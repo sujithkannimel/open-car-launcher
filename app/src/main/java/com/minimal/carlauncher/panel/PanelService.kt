@@ -1103,9 +1103,8 @@ class PanelService : Service() {
                 typeface = Typeface.MONOSPACE
                 setTypeface(typeface, Typeface.BOLD)
                 gravity = Gravity.CENTER
-                includeFontPadding = false
-                minWidth = px(38f)
-                setPadding(px(5f), px(1f), px(5f), px(2f))
+                width = px(44f)
+                setPadding(px(4f), px(2f), px(4f), px(3f))
             }
         }
         fun row(a: Int, b: Int) = LinearLayout(this).apply {
@@ -1124,7 +1123,7 @@ class PanelService : Service() {
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            background = GradientDrawable().apply { cornerRadius = px(12f).toFloat(); setColor(Neon.alpha(Color.WHITE, 10)) }
+            background = GradientDrawable().apply { cornerRadius = px(12f).toFloat(); setColor(Color.rgb(38, 39, 45)) }
             setPadding(px(10f), px(4f), px(10f), px(5f))
             addView(caption)
             addView(row(0, 1))
@@ -1160,6 +1159,7 @@ class PanelService : Service() {
                 })
             }
         }
+        block.invalidate()                              // full repaint: changed digits can't ghost
     }
 
     /**
