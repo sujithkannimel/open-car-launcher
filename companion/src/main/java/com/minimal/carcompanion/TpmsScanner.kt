@@ -25,6 +25,7 @@ object TpmsScanner {
     private val readings = HashMap<String, Live>()          // MAC (lowercase) -> latest
     @Volatile private var scanning = false
     @Volatile private var aggressiveMode = false    // mode the current scan is running in
+    @Volatile private var lastResultAt = 0L         // elapsed time of the last advert we decoded
     private var scanner: android.bluetooth.le.BluetoothLeScanner? = null
 
     private fun sp(c: Context) = c.getSharedPreferences("tpms", Context.MODE_PRIVATE)
@@ -170,7 +171,9 @@ object TpmsScanner {
         load(c)
         wantScan = true
         val wantAggr = aggressive(c)
-        if (scanning && wantAggr == aggressiveMode) return    // already scanning in the right mode
+        val stale = scanning && lastResultAt != 0L &&
+            SystemClock.elapsedRealtime() - lastResultAt > STALE_REARM_MS
+        if (scanning && wantAggr == aggressiveMode && !stale) return   // scanning fine in the right mode
         if (!canScan(c)) return
         val now = SystemClock.elapsedRealtime()
         val since = now - lastStartAt
@@ -185,6 +188,7 @@ object TpmsScanner {
         scanner = s
         aggressiveMode = wantAggr
         lastStartAt = now
+        lastResultAt = now                              // grace period before the next staleness check
         val b = ScanSettings.Builder()
             .setScanMode(if (wantAggr) ScanSettings.SCAN_MODE_LOW_LATENCY else ScanSettings.SCAN_MODE_BALANCED)
             .setReportDelay(0L)
@@ -199,8 +203,8 @@ object TpmsScanner {
         } catch (_: SecurityException) {} catch (_: Exception) {}
     }
 
-    /** The refresh button: make sure a scan is running (it usually already is). */
-    fun refresh(c: Context) = start(c)
+    /** The refresh button: force the scan to re-arm now (it may be silently dead). */
+    fun refresh(c: Context) { if (scanning) stop(keepWant = true); start(c) }
 
     fun stop(keepWant: Boolean = false) {
         if (!keepWant) { wantScan = false; main.removeCallbacksAndMessages(null) }
@@ -209,6 +213,7 @@ object TpmsScanner {
         scanning = false
     }
 
+    private const val STALE_REARM_MS = 60_000L      // no advert for this long -> re-arm the scan
     private var appCtx: Context? = null
     fun attach(c: Context) { appCtx = c.applicationContext }
 
@@ -217,6 +222,7 @@ object TpmsScanner {
             val bytes = result.scanRecord?.bytes ?: return
             val reading = Tpms.decode(bytes) ?: return
             val mac = result.device.address.lowercase()
+            lastResultAt = SystemClock.elapsedRealtime()
             synchronized(readings) { readings[mac] = Live(reading, SystemClock.elapsedRealtime()) }
             save(mac, reading)
         }
