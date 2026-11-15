@@ -1102,7 +1102,7 @@ class PanelService : Service() {
     /** A compact 2x2 tyre-pressure block (FL FR / RL RR) for the strip, coloured by pressure. */
     private fun buildClockTile(): View {
         val tv = TextView(this).apply {
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 60f)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 76f)
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
             includeFontPadding = false
