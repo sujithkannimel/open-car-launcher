@@ -95,6 +95,8 @@ class PanelService : Service() {
     private var tripView: TextView? = null
     /** The strip's 2x2 tyre-pressure block: FL FR / RL RR. */
     private var tyreCells: Array<TextView>? = null
+    private var clockText: TextView? = null
+    private val clockFmt = SimpleDateFormat("h:mm", Locale.US)
     private var tyreBlock: View? = null
     /** The strip's neon top line: flashes amber / red for a camera while another app is in front. */
     private var stripLine: View? = null
@@ -181,6 +183,7 @@ class PanelService : Service() {
             updateFuelDisplay()
             tripHeartbeat()
             maybeRefreshWeather()
+            updateClock()
             handler.postDelayed(this, WATCHDOG_INTERVAL_MS)
         }
     }
@@ -549,6 +552,7 @@ class PanelService : Service() {
         shownDockActive = -2
         updateDockActive()
 
+        centerBar.addView(buildClockTile(), LinearLayout.LayoutParams(W, W).apply { rightMargin = px(14f) })
         centerBar.addView(buildTyreStrip(), LinearLayout.LayoutParams(W, W).apply { rightMargin = px(10f) })
         for (b in listOf(btnHome, btnApps, btnNav)) {
             centerBar.addView(b, LinearLayout.LayoutParams(W, W).apply {
@@ -1096,6 +1100,27 @@ class PanelService : Service() {
     }
 
     /** A compact 2x2 tyre-pressure block (FL FR / RL RR) for the strip, coloured by pressure. */
+    private fun buildClockTile(): View {
+        val tv = TextView(this).apply {
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 30f)
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            includeFontPadding = false
+            setTextColor(Color.WHITE)
+            letterSpacing = 0.02f
+            setPadding(px(6f), 0, px(8f), 0)
+            text = clockFmt.format(Date())
+        }
+        clockText = tv
+        return tv
+    }
+
+    private fun updateClock() {
+        val tv = clockText ?: return
+        val s = clockFmt.format(Date())
+        if (tv.text != s) tv.text = s
+    }
+
     private fun buildTyreStrip(): View {
         val cells = Array(4) {
             TextView(this).apply {
