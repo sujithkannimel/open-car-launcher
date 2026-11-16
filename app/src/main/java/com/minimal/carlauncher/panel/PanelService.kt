@@ -480,6 +480,7 @@ class PanelService : Service() {
         battCol.addView(batteryBadge, LinearLayout.LayoutParams(W, W))
         battCol.addView(subRow, LinearLayout.LayoutParams(W, W))
         leftCluster.addView(battCol, LinearLayout.LayoutParams(W, W))
+        leftCluster.addView(buildClockTile(), LinearLayout.LayoutParams(W, M).apply { leftMargin = px(18f) })
         batteryBadgeView = batteryBadge
         battLabelView = battSubtitle
         tripView = trip
@@ -487,7 +488,7 @@ class PanelService : Service() {
         shownBattState = -1          // force re-style on the new views
         applyBatteryState(classify(currentVolts()))
 
-        val leftClusterParams = FrameLayout.LayoutParams(W, W, Gravity.START or Gravity.CENTER_VERTICAL).apply {
+        val leftClusterParams = FrameLayout.LayoutParams(W, M, Gravity.START or Gravity.CENTER_VERTICAL).apply {
             leftMargin = sideLeft
         }
         if (!adjusting) root.addView(leftCluster, leftClusterParams)
@@ -552,7 +553,6 @@ class PanelService : Service() {
         shownDockActive = -2
         updateDockActive()
 
-        centerBar.addView(buildClockTile(), LinearLayout.LayoutParams(W, M).apply { rightMargin = px(18f) })
         centerBar.addView(buildTyreStrip(), LinearLayout.LayoutParams(W, W).apply { rightMargin = px(10f) })
         for (b in listOf(btnHome, btnApps, btnNav)) {
             centerBar.addView(b, LinearLayout.LayoutParams(W, W).apply {
