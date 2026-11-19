@@ -479,8 +479,8 @@ class PanelService : Service() {
         }
         battCol.addView(batteryBadge, LinearLayout.LayoutParams(W, W))
         battCol.addView(subRow, LinearLayout.LayoutParams(W, W))
+        leftCluster.addView(buildClockTile(), LinearLayout.LayoutParams(W, M).apply { rightMargin = px(18f) })
         leftCluster.addView(battCol, LinearLayout.LayoutParams(W, W))
-        leftCluster.addView(buildClockTile(), LinearLayout.LayoutParams(W, M).apply { leftMargin = px(18f) })
         batteryBadgeView = batteryBadge
         battLabelView = battSubtitle
         tripView = trip
@@ -488,10 +488,7 @@ class PanelService : Service() {
         shownBattState = -1          // force re-style on the new views
         applyBatteryState(classify(currentVolts()))
 
-        val leftClusterParams = FrameLayout.LayoutParams(W, M, Gravity.START or Gravity.CENTER_VERTICAL).apply {
-            leftMargin = sideLeft
-        }
-        if (!adjusting) root.addView(leftCluster, leftClusterParams)
+        // leftCluster is placed into the single strip row below, not as its own layer.
 
         // 3b. RIGHT: fuel range chip (software estimate; tap to set up / log a fill-up)
         val sideRight = Prefs.knobRightX + Prefs.knobArcRadius + 46
@@ -536,9 +533,7 @@ class PanelService : Service() {
         fuelBadgeView = fuelBadge; fuelText = fText; fuelIcon = fIcon; fuelLabel = fLabel
         shownFuelKey = ""
         updateFuelDisplayNow()
-        if (!adjusting) root.addView(rightCluster, FrameLayout.LayoutParams(W, W, Gravity.END or Gravity.CENTER_VERTICAL).apply {
-            rightMargin = sideRight
-        })
+        // rightCluster is placed into the single strip row below, not as its own layer.
 
         // 4. CENTER: Quick-Launcher Buttons (gradient squircle)
         val centerBar = LinearLayout(this).apply {
@@ -565,7 +560,23 @@ class PanelService : Service() {
         if (adjusting) {
             root.addView(buildAdjustBar(), FrameLayout.LayoutParams(W, h, Gravity.CENTER))
         } else {
-            root.addView(centerBar, FrameLayout.LayoutParams(W, h, Gravity.CENTER))
+            // One flowing row across the whole area between the two knob arcs. Everything lives in
+            // a single LinearLayout, so no two items can ever overlap. Weighted spacers spread the
+            // three groups: info (voltage + clock) hard left, controls (tyres + dock + speed) in the
+            // middle, fuel hard right.
+            val strip = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                clipChildren = false; clipToPadding = false
+            }
+            strip.addView(leftCluster, LinearLayout.LayoutParams(W, M))
+            strip.addView(View(this), LinearLayout.LayoutParams(0, px(1f), 1f))
+            strip.addView(centerBar, LinearLayout.LayoutParams(W, M))
+            strip.addView(View(this), LinearLayout.LayoutParams(0, px(1f), 1f))
+            strip.addView(rightCluster, LinearLayout.LayoutParams(W, M))
+            root.addView(strip, FrameLayout.LayoutParams(M, h, Gravity.CENTER).apply {
+                leftMargin = sideLeft; rightMargin = sideRight
+            })
         }
 
         try {
