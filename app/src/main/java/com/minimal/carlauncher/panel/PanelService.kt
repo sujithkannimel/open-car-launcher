@@ -381,12 +381,11 @@ class PanelService : Service() {
         // Side clusters sit just past each arc's labels, so they follow any recalibration.
         val sideLeft = Prefs.knobLeftX + Prefs.knobArcRadius + 46
 
-        // 3. LOWER LEFT: Battery Voltage Pill Badge
+        // 3. LOWER LEFT: charging/voltage on a small line, big clock beneath it.
         val leftCluster = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
+            orientation = LinearLayout.VERTICAL
             gravity = Gravity.START or Gravity.CENTER_VERTICAL
-            setPadding(px(6f), px(10f), px(10f), px(10f))
-            // Let the pill's neon halo spill outside its bounds.
+            setPadding(px(6f), px(6f), px(10f), px(6f))
             clipChildren = false
             clipToPadding = false
         }
@@ -394,9 +393,9 @@ class PanelService : Service() {
         val batteryBadge = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            background = GradientDrawable().apply { cornerRadius = px(14f).toFloat() }
-            elevation = px(8f).toFloat()
-            setPadding(px(14f), px(6f), px(14f), px(6f))
+            background = GradientDrawable().apply { cornerRadius = px(12f).toFloat() }
+            elevation = px(6f).toFloat()
+            setPadding(px(12f), px(4f), px(12f), px(4f))
             isClickable = true
             isFocusable = true
             setOnClickListener {
@@ -404,7 +403,6 @@ class PanelService : Service() {
                 Toast.makeText(this@PanelService, "Voltage $curV\nsource: ${volts.source}", Toast.LENGTH_LONG).show()
                 updateBatteryDisplay()
             }
-            // Long-press the pill to line the knob graphics up with the physical knobs.
             setOnLongClickListener {
                 it.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                 adjusting = true
@@ -412,11 +410,10 @@ class PanelService : Service() {
                 true
             }
         }
-
         val voltText = TextView(this).apply {
             text = "\u26A1 " + volts.display()
             setTextColor(Color.rgb(0, 240, 255))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 17f)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
             includeFontPadding = false
@@ -429,58 +426,44 @@ class PanelService : Service() {
             setTextColor(Neon.DIM)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
             typeface = Typeface.DEFAULT_BOLD
-            letterSpacing = 0.14f
+            letterSpacing = 0.10f
             includeFontPadding = false
         }
-        val trip = TextView(this).apply {
-            text = trips.tripText()
-            setTextColor(Neon.TEXT_2)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-            typeface = Typeface.MONOSPACE
+
+        // Weather (icon + temperature) — shown in the centre group, built here so the fields exist.
+        val wIcon = WeatherIconView(this)
+        val wTemp = TextView(this).apply {
+            setTextColor(Neon.TEXT)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+            typeface = Typeface.DEFAULT_BOLD
             includeFontPadding = false
-            setPadding(px(4f), px(4f), px(4f), px(4f))
-            isClickable = true
-            setOnClickListener {
-                it.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                openTrips("trips")
-            }
         }
-        val subRow = LinearLayout(this).apply {
+        val weatherBox = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(px(6f), px(6f), 0, 0)
-            addView(battSubtitle)
-            addView(trip, LinearLayout.LayoutParams(W, W).apply { leftMargin = px(12f) })
-            // Weather: phone-style icon + temperature, plain (no pill). Tap = quick summary.
-            val wIcon = WeatherIconView(this@PanelService)
-            val wTemp = TextView(this@PanelService).apply {
-                setTextColor(Neon.TEXT)
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
-                typeface = Typeface.DEFAULT_BOLD
-                includeFontPadding = false
-            }
-            val wBox = LinearLayout(this@PanelService).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(px(4f), px(2f), px(4f), px(2f))
-                isClickable = true
-                setOnClickListener { showWeatherSummary() }
-                addView(wIcon, LinearLayout.LayoutParams(px(24f), px(24f)).apply { rightMargin = px(5f) })
-                addView(wTemp)
-            }
-            addView(wBox, LinearLayout.LayoutParams(W, W).apply { leftMargin = px(10f) })
-            weatherIcon = wIcon
-            weatherTemp = wTemp
+            setPadding(px(4f), px(2f), px(4f), px(2f))
+            isClickable = true
+            setOnClickListener { showWeatherSummary() }
+            addView(wIcon, LinearLayout.LayoutParams(px(24f), px(24f)).apply { rightMargin = px(5f) })
+            addView(wTemp)
         }
-        val battCol = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.START or Gravity.CENTER_VERTICAL
+        weatherIcon = wIcon
+        weatherTemp = wTemp
+
+        // Trip odometer: kept as a live object (reachable from the Trips screen); not on the strip.
+        val trip = TextView(this).apply { text = trips.tripText() }
+
+        // Small charging/voltage header row.
+        val chargeLine = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
             clipChildren = false; clipToPadding = false
+            addView(batteryBadge, LinearLayout.LayoutParams(W, W))
+            addView(battSubtitle, LinearLayout.LayoutParams(W, W).apply { leftMargin = px(10f) })
         }
-        battCol.addView(batteryBadge, LinearLayout.LayoutParams(W, W))
-        battCol.addView(subRow, LinearLayout.LayoutParams(W, W))
-        leftCluster.addView(buildClockTile(), LinearLayout.LayoutParams(W, M).apply { rightMargin = px(18f) })
-        leftCluster.addView(battCol, LinearLayout.LayoutParams(W, W))
+        leftCluster.addView(chargeLine, LinearLayout.LayoutParams(W, W).apply { leftMargin = px(2f) })
+        leftCluster.addView(buildClockTile(), LinearLayout.LayoutParams(W, W).apply { topMargin = px(1f); leftMargin = px(2f) })
+
         batteryBadgeView = batteryBadge
         battLabelView = battSubtitle
         tripView = trip
@@ -556,6 +539,7 @@ class PanelService : Service() {
         }
         // Where the Phone button was: speed, or the camera warning while one is ahead.
         centerBar.addView(buildCamSlot(), LinearLayout.LayoutParams(W, W).apply { leftMargin = px(10f); rightMargin = px(10f) })
+        centerBar.addView(weatherBox, LinearLayout.LayoutParams(W, W).apply { leftMargin = px(8f) })
 
         if (adjusting) {
             root.addView(buildAdjustBar(), FrameLayout.LayoutParams(W, h, Gravity.CENTER))
@@ -575,7 +559,8 @@ class PanelService : Service() {
             strip.addView(View(this), LinearLayout.LayoutParams(0, px(1f), 1f))
             strip.addView(rightCluster, LinearLayout.LayoutParams(W, M))
             root.addView(strip, FrameLayout.LayoutParams(M, h, Gravity.CENTER).apply {
-                leftMargin = sideLeft; rightMargin = sideRight
+                leftMargin = knobs.leftExtent() + px(14f)
+                rightMargin = knobs.rightExtent() + px(14f)
             })
         }
 
@@ -1113,7 +1098,7 @@ class PanelService : Service() {
     /** A compact 2x2 tyre-pressure block (FL FR / RL RR) for the strip, coloured by pressure. */
     private fun buildClockTile(): View {
         val tv = TextView(this).apply {
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 76f)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 56f)
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
             includeFontPadding = false
